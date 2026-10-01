@@ -1,0 +1,19 @@
+# Build output
+build/
+dist/
+out/
+.gradle/
+*.class
+*.log
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+.project
+.classpath
+.settings/
+
+# OS files
+.DS_Store
+Thumbs.db

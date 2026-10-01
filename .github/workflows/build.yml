@@ -1,0 +1,179 @@
+name: Build
+
+# Runs on every push and pull request, and can be started by hand (Actions tab -> Build -> Run workflow).
+# Pushing a tag like v0.1.0 also publishes a GitHub Release with the Windows installer.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GRADLE_VERSION: '8.14.5'
+  # Fixed forever: lets a newer installer replace an older install instead of installing side by side.
+  UPGRADE_UUID: '39fa03b1-6d62-485d-9c47-bd4234ad561b'
+  # Java modules the packaged app needs (JavaFX, HTTPS, logging, Desktop.open).
+  JAVA_MODULES: 'java.base,java.desktop,java.logging,java.xml,java.naming,java.sql,java.net.http,jdk.unsupported,jdk.jsobject,jdk.crypto.ec'
+
+jobs:
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Install Gradle ${{ env.GRADLE_VERSION }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+          curl -fsSL "$base" -o "$RUNNER_TEMP/gradle.zip"
+          if expected=$(curl -fsSL "$base.sha256" | tr -d '[:space:]'); then
+            echo "$expected  $RUNNER_TEMP/gradle.zip" | sha256sum -c -
+          else
+            echo "::warning::Could not download the Gradle checksum, skipping verification"
+          fi
+          unzip -q "$RUNNER_TEMP/gradle.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Run tests
+        run: gradle test --no-daemon
+
+      - name: Keep the test report if something failed
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-report
+          path: build/reports/tests/test
+
+  package-windows:
+    name: Windows installer and portable app
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Work out the version
+        id: ver
+        shell: pwsh
+        run: |
+          $version = '0.1.0'
+          if ($env:GITHUB_REF -match '^refs/tags/v(\d+\.\d+(\.\d+)?)$') { $version = $Matches[1] }
+          elseif ($env:GITHUB_REF -like 'refs/tags/v*') { Write-Warning "Tag is not like v1.2.3, using 0.1.0" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Building version $version"
+
+      - name: Install Gradle ${{ env.GRADLE_VERSION }}
+        shell: pwsh
+        run: |
+          $ver = $env:GRADLE_VERSION
+          $zip = Join-Path $env:RUNNER_TEMP 'gradle.zip'
+          $url = "https://services.gradle.org/distributions/gradle-$ver-bin.zip"
+          Invoke-WebRequest $url -OutFile $zip
+          $expected = $null
+          try {
+            $content = (Invoke-WebRequest "$url.sha256").Content
+            if ($content -is [byte[]]) { $content = [Text.Encoding]::ASCII.GetString($content) }
+            $expected = $content.Trim().Split()[0].ToLower()
+          } catch {
+            Write-Warning "Could not download the Gradle checksum, skipping verification"
+          }
+          if ($expected) {
+            $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+            if ($actual -ne $expected) { throw "Gradle download does not match its checksum" }
+          }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          Join-Path $env:RUNNER_TEMP "gradle-$ver\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+      - name: Make the WiX Toolset available
+        shell: pwsh
+        run: |
+          $wix = Join-Path ${env:ProgramFiles(x86)} 'WiX Toolset v3.14\bin'
+          if (-not (Test-Path $wix)) { throw "WiX Toolset 3.14 was not found on this runner" }
+          $wix | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+      - name: Build the jars
+        run: gradle prepareJpackage --no-daemon
+
+      - name: Create the portable app
+        shell: pwsh
+        run: |
+          jpackage --type app-image --name MinecraftManager --app-version "${{ steps.ver.outputs.version }}" `
+            --vendor "Minecraft Manager" --input build\jpackage-input --main-jar mc-manager.jar `
+            --main-class app.Launcher --dest dist\app --add-modules $env:JAVA_MODULES `
+            --java-options "-Xmx512m"
+          if ($LASTEXITCODE -ne 0) { throw "jpackage (portable) failed" }
+
+      - name: Create the installer
+        shell: pwsh
+        run: |
+          jpackage --type exe --name MinecraftManager --app-version "${{ steps.ver.outputs.version }}" `
+            --vendor "Minecraft Manager" --description "Minecraft mod and instance manager" `
+            --input build\jpackage-input --main-jar mc-manager.jar --main-class app.Launcher `
+            --dest dist\installer --add-modules $env:JAVA_MODULES --java-options "-Xmx512m" `
+            --win-menu --win-shortcut --win-dir-chooser --win-per-user-install `
+            --win-menu-group "Minecraft Manager" --win-upgrade-uuid $env:UPGRADE_UUID
+          if ($LASTEXITCODE -ne 0) { throw "jpackage (installer) failed" }
+
+      - name: Smoke test (informational, does not fail the build)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $p = Start-Process "dist\app\MinecraftManager\MinecraftManager.exe" -PassThru
+          Start-Sleep -Seconds 20
+          if ($p.HasExited) { Write-Warning "The app exited early with code $($p.ExitCode)" }
+          else { Write-Host "The app is running"; Stop-Process $p -Force }
+          $log = Join-Path $env:APPDATA 'MinecraftManager\logs\app.log'
+          if (Test-Path $log) { Get-Content $log -Tail 30 } else { Write-Warning "No log file was written" }
+
+      - name: Collect the files
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          New-Item -ItemType Directory -Force out | Out-Null
+          Compress-Archive -Path dist\app\MinecraftManager -DestinationPath "out\MinecraftManager-$v-windows-portable.zip"
+          Copy-Item dist\installer\*.exe out
+          Get-ChildItem out -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          } | Set-Content -Encoding utf8 out\SHA256SUMS.txt
+          Get-ChildItem out | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: MinecraftManager-windows
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: package-windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: MinecraftManager-windows
+          path: out
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: out/*
+          generate_release_notes: true

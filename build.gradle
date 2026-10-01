@@ -1,0 +1,49 @@
+plugins {
+    id 'application'
+    id 'org.openjfx.javafxplugin' version '0.1.0'
+}
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+javafx {
+    version = '21.0.5'
+    modules = ['javafx.controls']
+}
+
+dependencies {
+    implementation 'com.google.code.gson:gson:2.11.0'
+    implementation 'org.slf4j:slf4j-api:2.0.16'
+    runtimeOnly 'ch.qos.logback:logback-classic:1.5.12'
+
+    testImplementation platform('org.junit:junit-bom:5.11.3')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+application {
+    mainClass = 'app.Launcher'
+}
+
+tasks.test {
+    useJUnitPlatform()
+}
+
+jar {
+    archiveFileName = 'mc-manager.jar'
+}
+
+// Collects the app jar + all dependency jars into one folder for jpackage
+tasks.register('prepareJpackage', Copy) {
+    dependsOn jar
+    from jar
+    from configurations.runtimeClasspath
+    into layout.buildDirectory.dir('jpackage-input')
+}
