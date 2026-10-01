@@ -149,6 +149,33 @@ public final class ModrinthProvider implements ContentProvider {
         return result;
     }
 
+    @Override
+    public ProjectVersion version(String versionId) {
+        if (versionId == null || !versionId.matches("[A-Za-z0-9]{1,32}")) {
+            throw new ProviderException("That version has an invalid identifier.");
+        }
+        ProjectVersion v = toVersion(parseObject(get(baseUrl + "/version/" + versionId)));
+        if (v == null) throw unexpected(null);
+        return v;
+    }
+
+    @Override
+    public ProjectSummary project(String projectId) {
+        if (projectId == null || !projectId.matches("[A-Za-z0-9]{1,32}")) {
+            throw new ProviderException("That project has an invalid identifier.");
+        }
+        JsonObject o = parseObject(get(baseUrl + "/project/" + projectId));
+        // A single project uses "id"; search results use "project_id". Accept either.
+        String id = string(o, "id") != null ? string(o, "id") : string(o, "project_id");
+        String title = string(o, "title");
+        if (id == null || title == null) throw unexpected(null);
+        return new ProjectSummary(id, string(o, "slug"),
+                ProjectType.fromApi(string(o, "project_type"), ProjectType.MOD),
+                title, nullToEmpty(string(o, "description")), "", string(o, "icon_url"),
+                number(o, "downloads"), number(o, "followers"), strings(o, "categories"),
+                List.of(), null, string(o, "updated"));
+    }
+
     private static ProjectVersion toVersion(JsonObject o) {
         String id = string(o, "id");
         if (id == null) return null;

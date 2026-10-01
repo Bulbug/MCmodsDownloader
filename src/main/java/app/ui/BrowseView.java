@@ -82,6 +82,7 @@ public final class BrowseView {
     private final Label versionInfo = new Label();
     private final TableView<ProjectVersion> versionTable = new TableView<>();
     private final Button downloadButton = new Button("Download file");
+    private final Button installButton = new Button("Install to instance...");
     private final Button pageButton = new Button("Open project page");
 
     private final Map<String, Image> iconCache = new LinkedHashMap<>(64, 0.75f, true) {
@@ -277,7 +278,7 @@ public final class BrowseView {
         sb.append("Requires ").append(required).append(required == 1 ? " other project" : " other projects");
         if (optional > 0) sb.append(", ").append(optional).append(" optional");
         if (incompatible > 0) sb.append(", incompatible with ").append(incompatible);
-        sb.append(". Dependencies are installed automatically in a later phase.");
+        sb.append(". Use \"Install to instance\" to add it with everything it needs.");
         versionInfo.setText(sb.toString());
     }
 
@@ -367,6 +368,13 @@ public final class BrowseView {
         versionTable.getSelectionModel().selectedItemProperty().addListener((o, a, b) -> showVersion(b));
 
         downloadButton.setOnAction(e -> onDownload());
+        installButton.setVisible(type == ProjectType.MOD);
+        installButton.setManaged(type == ProjectType.MOD);
+        installButton.setOnAction(e -> {
+            ProjectSummary p = results.getSelectionModel().getSelectedItem();
+            ProjectVersion v = versionTable.getSelectionModel().getSelectedItem();
+            if (p != null && v != null) new InstallFlow(context, root, status::setText).start(p, v);
+        });
         pageButton.setOnAction(e -> {
             ProjectSummary p = results.getSelectionModel().getSelectedItem();
             if (p != null) {
@@ -376,7 +384,7 @@ public final class BrowseView {
         });
 
         VBox box = new VBox(8, detailTitle, detailMeta, detailDescription,
-                new Label("Versions"), versionTable, versionInfo, new HBox(8, downloadButton, pageButton));
+                new Label("Versions"), versionTable, versionInfo, new HBox(8, installButton, downloadButton, pageButton));
         box.getChildren().get(3).getStyleClass().add("section-title");
         box.setPadding(new Insets(0, 0, 0, 10));
         VBox.setVgrow(versionTable, Priority.ALWAYS);
@@ -384,8 +392,10 @@ public final class BrowseView {
     }
 
     private void updateDetailButtons() {
-        downloadButton.setDisable(versionTable.getSelectionModel().getSelectedItem() == null
-                || versionTable.getSelectionModel().getSelectedItem().primaryFile() == null);
+        boolean noFile = versionTable.getSelectionModel().getSelectedItem() == null
+                || versionTable.getSelectionModel().getSelectedItem().primaryFile() == null;
+        downloadButton.setDisable(noFile);
+        installButton.setDisable(noFile);
         pageButton.setDisable(results.getSelectionModel().getSelectedItem() == null);
     }
 

@@ -19,4 +19,10 @@ public interface ContentProvider {
      * @param loader           filter (fabric, forge, ...) or null
      */
     List<ProjectVersion> versions(String projectId, String minecraftVersion, String loader) throws ProviderException;
+
+    /** One specific version by its id (used when a dependency names an exact version). */
+    ProjectVersion version(String versionId) throws ProviderException;
+
+    /** Basic information about a project, mainly to show its name. Takes a project id. */
+    ProjectSummary project(String projectId) throws ProviderException;
 }

@@ -1,0 +1,20 @@
+package app.mods;
+
+import java.util.List;
+
+/**
+ * A mod this app installed into an instance (stored in installed-content.json).
+ *
+ * @param explicit        true if the user chose it, false if it came in as a dependency
+ * @param requires        project ids of the required mods that were present at install time
+ * @param incompatibleWith project ids this mod declares as incompatible
+ */
+public record InstalledMod(String projectId, String title, String versionId, String versionNumber,
+                           String fileName, String sha512, boolean explicit, long installedAt,
+                           List<String> requires, List<String> incompatibleWith) {
+
+    public InstalledMod {
+        requires = requires == null ? List.of() : List.copyOf(requires);
+        incompatibleWith = incompatibleWith == null ? List.of() : List.copyOf(incompatibleWith);
+    }
+}

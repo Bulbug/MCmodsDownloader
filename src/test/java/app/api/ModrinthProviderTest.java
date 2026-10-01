@@ -228,6 +228,42 @@ class ModrinthProviderTest {
         assertEquals(0, hits.get());
     }
 
+    // ---- single version / project lookups -----------------------------------------------
+
+    @Test
+    void versionByIdParsesTheVersionObject() {
+        forcedBody = """
+                {"id":"verXYZ","project_id":"AAAA1111","name":"N","version_number":"3.0","version_type":"release",
+                 "game_versions":["1.21.8"],"loaders":["fabric"],"date_published":"2026-05-01T10:00:00Z","downloads":1,
+                 "dependencies":[],"files":[{"hashes":{"sha512":"%s"},"url":"https://cdn.modrinth.com/x/main.jar",
+                 "filename":"main.jar","primary":true,"size":7}]}
+                """.formatted("e".repeat(128));
+
+        ProjectVersion v = provider.version("verXYZ");
+
+        assertEquals("/v2/version/verXYZ", lastPath);
+        assertEquals("3.0", v.versionNumber());
+        assertEquals("main.jar", v.primaryFile().fileName());
+        assertThrows(ProviderException.class, () -> provider.version("../etc"));
+    }
+
+    @Test
+    void projectLookupAcceptsIdOrProjectIdField() {
+        forcedBody = "{\"id\":\"AAAA1111\",\"slug\":\"fabric-api\",\"title\":\"Fabric API\","
+                + "\"project_type\":\"mod\",\"description\":\"d\",\"downloads\":5,\"followers\":2}";
+        ProjectSummary p = provider.project("AAAA1111");
+        assertEquals("/v2/project/AAAA1111", lastPath);
+        assertEquals("Fabric API", p.title());
+        assertEquals("fabric-api", p.slug());
+
+        forcedBody = "{\"project_id\":\"BBBB2222\",\"title\":\"Other\"}";
+        assertEquals("BBBB2222", provider.project("BBBB2222").id());
+
+        forcedBody = "{\"slug\":\"no-title-or-id\"}";
+        assertThrows(ProviderException.class, () -> provider.project("CCCC3333"));
+        assertThrows(ProviderException.class, () -> provider.project("bad/id"));
+    }
+
     // ---- errors ----------------------------------------------------------------------
 
     @Test
