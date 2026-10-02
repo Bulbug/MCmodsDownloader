@@ -1,6 +1,8 @@
 package app.ui;
 
 import app.api.ProjectVersion;
+import app.backup.BackupPart;
+import app.backup.BackupService;
 import app.configuration.AppContext;
 import app.instance.Instance;
 import app.mods.DependencyResolver;
@@ -323,7 +325,11 @@ final class InstalledModsDialog {
         text.setEditable(false);
         text.setWrapText(true);
         text.setPrefSize(560, 280);
-        confirm.getDialogPane().setContent(text);
+        CheckBox backupFirst = new CheckBox("Back up this instance's mods and config first");
+        backupFirst.setSelected(true);
+        VBox confirmContent = new VBox(10, text);
+        if (plan.canInstall()) confirmContent.getChildren().add(backupFirst);
+        confirm.getDialogPane().setContent(confirmContent);
         ButtonType apply = new ButtonType("Replace", ButtonBar.ButtonData.OK_DONE);
         if (plan.canInstall()) confirm.getDialogPane().getButtonTypes().add(apply);
         confirm.getDialogPane().getButtonTypes().add(plan.canInstall() ? ButtonType.CANCEL : ButtonType.CLOSE);
@@ -331,10 +337,17 @@ final class InstalledModsDialog {
         Optional<ButtonType> answer = confirm.showAndWait();
         if (answer.isEmpty() || answer.get() != apply) return;
 
+        boolean makeBackup = backupFirst.isSelected();
         setBusy(true);
         Task<Integer> task = new Task<>() {
             @Override
             protected Integer call() {
+                if (makeBackup) {
+                    Platform.runLater(() -> status.setText("Backing up first..."));
+                    new BackupService(context.paths().backupsDir()).create(instance, instanceDir,
+                            java.util.EnumSet.of(BackupPart.MODS, BackupPart.CONFIG), false,
+                            "Before changing " + current.title(), () -> false, (done, total) -> { });
+                }
                 return new ModInstaller(context.downloads()).update(plan, current, instanceDir, () -> false,
                         msg -> Platform.runLater(() -> status.setText(msg))).size();
             }
@@ -348,9 +361,9 @@ final class InstalledModsDialog {
         task.setOnFailed(e -> {
             setBusy(false);
             Throwable error = task.getException();
-            String message = error instanceof InstallException ? error.getMessage()
+            String message = error instanceof InstallException || error instanceof app.backup.BackupException ? error.getMessage()
                     : "Something went wrong. Details were written to the log file.";
-            if (!(error instanceof InstallException)) log.error("Update failed", error);
+            if (!(error instanceof InstallException || error instanceof app.backup.BackupException)) log.error("Update failed", error);
             status.setText(message);
             Alert alert = new Alert(Alert.AlertType.ERROR, message, ButtonType.CLOSE);
             alert.setHeaderText("The version was not changed");

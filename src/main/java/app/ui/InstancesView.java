@@ -11,6 +11,7 @@ import javafx.geometry.Insets;
 import javafx.scene.Node;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Dialog;
@@ -55,6 +56,8 @@ public final class InstancesView {
     private final Button renameButton = new Button("Rename");
     private final Button duplicateButton = new Button("Duplicate");
     private final Button modsButton = new Button("Installed mods");
+    private final Button backupButton = new Button("Backup...");
+    private final Button backupsButton = new Button("Backups");
     private final Button openButton = new Button("Open folder");
     private final Button deleteButton = new Button("Delete");
     private final Button refreshButton = new Button("Refresh");
@@ -81,12 +84,15 @@ public final class InstancesView {
                 ? "never" : DATE.format(Instant.ofEpochMilli(i.lastPlayed()))));
         table.setPrefHeight(360);
 
-        HBox buttons = new HBox(8, newButton, renameButton, duplicateButton, modsButton, openButton, deleteButton, refreshButton);
+        HBox buttons = new HBox(8, newButton, renameButton, duplicateButton, modsButton, backupButton, backupsButton,
+                openButton, deleteButton, refreshButton);
 
         newButton.setOnAction(e -> onCreate());
         renameButton.setOnAction(e -> onRename());
         duplicateButton.setOnAction(e -> onDuplicate());
         modsButton.setOnAction(e -> onMods());
+        backupButton.setOnAction(e -> onBackup());
+        backupsButton.setOnAction(e -> new BackupsDialog(context, box).show());
         openButton.setOnAction(e -> onOpenFolder());
         deleteButton.setOnAction(e -> onDelete());
         refreshButton.setOnAction(e -> refresh());
@@ -174,6 +180,13 @@ public final class InstancesView {
         });
     }
 
+    private void onBackup() {
+        Instance selected = selected();
+        if (selected == null) return;
+        runAsync(() -> service.folderOf(selected.id()),
+                folder -> new BackupFlow(context, box, status::setText).createBackup(selected, folder));
+    }
+
     private void onMods() {
         Instance selected = selected();
         if (selected == null) return;
@@ -196,22 +209,33 @@ public final class InstancesView {
             String text = worlds > 0
                     ? "This instance contains " + worlds + " world" + (worlds == 1 ? "" : "s")
                     + ".\nDeleting the instance will permanently delete "
-                    + (worlds == 1 ? "it" : "them") + " too.\n\nThis cannot be undone."
-                    : "This will permanently delete the instance folder and everything in it.\n\nThis cannot be undone.";
-            Alert alert = new Alert(Alert.AlertType.CONFIRMATION, text, ButtonType.CANCEL, ButtonType.OK);
+                    + (worlds == 1 ? "it" : "them") + " too.\n\nCreate a backup first?"
+                    : "This will permanently delete the instance folder and everything in it.\n\nCreate a backup first?";
+            ButtonType backupAndDelete = new ButtonType("Backup and delete", ButtonBar.ButtonData.LEFT);
+            ButtonType deleteOnly = new ButtonType("Delete", ButtonBar.ButtonData.OK_DONE);
+            Alert alert = new Alert(Alert.AlertType.CONFIRMATION, text, backupAndDelete, deleteOnly, ButtonType.CANCEL);
             alert.setTitle("Delete instance");
             alert.setHeaderText("Delete \"" + selected.name() + "\"?");
-            ((Button) alert.getDialogPane().lookupButton(ButtonType.OK)).setText("Delete");
+            alert.getDialogPane().setMinHeight(javafx.scene.layout.Region.USE_PREF_SIZE);
             style(alert);
+
             Optional<ButtonType> answer = alert.showAndWait();
-            if (answer.isPresent() && answer.get() == ButtonType.OK) {
-                runAsync(() -> {
-                    service.delete(selected.id());
-                    return selected.name();
-                }, name -> {
-                    status.setText("Deleted \"" + name + "\".");
-                    refresh();
-                });
+            if (answer.isEmpty() || answer.get() == ButtonType.CANCEL) return;
+
+            Runnable delete = () -> runAsync(() -> {
+                service.delete(selected.id());
+                return selected.name();
+            }, name -> {
+                status.setText("Deleted \"" + name + "\".");
+                refresh();
+            });
+
+            if (answer.get() == backupAndDelete) {
+                // The instance is only deleted if the backup succeeded.
+                runAsync(() -> service.folderOf(selected.id()), folder ->
+                        new BackupFlow(context, box, status::setText).backupThen(selected, folder, delete));
+            } else {
+                delete.run();
             }
         });
     }
@@ -269,6 +293,7 @@ public final class InstancesView {
         renameButton.setDisable(none);
         duplicateButton.setDisable(none);
         modsButton.setDisable(none);
+        backupButton.setDisable(none);
         openButton.setDisable(none);
         deleteButton.setDisable(none);
     }

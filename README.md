@@ -1,6 +1,6 @@
 # Minecraft Manager
 
-Status: Phases 1-5, Settings, Phase 6 (install, remove, update and roll back mods).
+Status: Phases 1-5, Settings, Phase 6 (mods) and Phase 10 part 1 (backups).
 
 ## Requirements
 - JDK 21 (jpackage on PATH: `jpackage --version`)
@@ -39,3 +39,9 @@ Instances page -> select an instance -> "Installed mods" -> "Check for updates".
 mod in the instance by the hash of the file on disk. Select a mod with an arrow in the Update column and
 click "Update...", or use "Change version..." to pick any compatible version (including an older one to
 roll back). The plan is shown first; the old file moves to `.removed`, and a failed update changes nothing.
+
+## Backups
+Instances page: "Backup..." (choose what to include), "Backups" (all backups: restore, restore as new
+instance, export, delete) and "Backup and delete" in the Delete dialog. Backups are normal .zip files in
+the app's backups folder, kept outside the instances so they survive deleting one. Restoring first makes
+an automatic safety copy of what it replaces, and any failure puts everything back.
