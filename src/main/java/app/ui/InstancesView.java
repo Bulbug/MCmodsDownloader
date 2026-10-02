@@ -53,6 +53,7 @@ public final class InstancesView {
     private final Button newButton = new Button("New instance");
     private final Button renameButton = new Button("Rename");
     private final Button duplicateButton = new Button("Duplicate");
+    private final Button modsButton = new Button("Installed mods");
     private final Button openButton = new Button("Open folder");
     private final Button deleteButton = new Button("Delete");
     private final Button refreshButton = new Button("Refresh");
@@ -78,11 +79,12 @@ public final class InstancesView {
                 ? "never" : DATE.format(Instant.ofEpochMilli(i.lastPlayed()))));
         table.setPrefHeight(360);
 
-        HBox buttons = new HBox(8, newButton, renameButton, duplicateButton, openButton, deleteButton, refreshButton);
+        HBox buttons = new HBox(8, newButton, renameButton, duplicateButton, modsButton, openButton, deleteButton, refreshButton);
 
         newButton.setOnAction(e -> onCreate());
         renameButton.setOnAction(e -> onRename());
         duplicateButton.setOnAction(e -> onDuplicate());
+        modsButton.setOnAction(e -> onMods());
         openButton.setOnAction(e -> onOpenFolder());
         deleteButton.setOnAction(e -> onDelete());
         refreshButton.setOnAction(e -> refresh());
@@ -168,6 +170,13 @@ public final class InstancesView {
             status.setText("Created \"" + copy.name() + "\".");
             refresh();
         });
+    }
+
+    private void onMods() {
+        Instance selected = selected();
+        if (selected == null) return;
+        runAsync(() -> service.folderOf(selected.id()),
+                folder -> new InstalledModsDialog(selected, folder, box).show());
     }
 
     private void onOpenFolder() {
@@ -257,6 +266,7 @@ public final class InstancesView {
         boolean none = selected() == null;
         renameButton.setDisable(none);
         duplicateButton.setDisable(none);
+        modsButton.setDisable(none);
         openButton.setDisable(none);
         deleteButton.setDisable(none);
     }

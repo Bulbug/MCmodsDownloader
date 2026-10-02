@@ -1,6 +1,6 @@
 # Minecraft Manager
 
-Status: Phases 1-5, Settings, and Phase 6.1 (install mods into instances with dependency resolution).
+Status: Phases 1-5, Settings, Phase 6.1 (install mods) and 6.2 (installed mods list, safe removal).
 
 ## Requirements
 - JDK 21 (jpackage on PATH: `jpackage --version`)
@@ -27,3 +27,9 @@ Mods page -> select a result and a version -> "Install to instance...". The app 
 Minecraft version and loader, resolves required dependencies, shows the plan, and only then downloads
 into a staging folder. Everything is installed together or not at all. What was installed is recorded
 in the instance folder (installed-content.json).
+
+## Managing and removing mods (Phase 6.2)
+Instances page -> select an instance -> "Installed mods". Removing a mod moves its file to
+`<instance>/.removed/<time>/` (nothing is deleted), warns if other mods need it, and can also
+remove dependency-only mods that nothing else uses. To restore a mod, move the file back into
+`game/mods`.
