@@ -20,8 +20,11 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -176,6 +179,50 @@ public final class ModrinthProvider implements ContentProvider {
                 List.of(), null, string(o, "updated"));
     }
 
+    @Override
+    public Map<String, ProjectVersion> latestVersionsForHashes(Collection<String> sha512Hashes, String minecraftVersion,
+                                                                String loader, boolean releaseOnly) {
+        Map<String, ProjectVersion> result = new LinkedHashMap<>();
+        if (sha512Hashes.isEmpty()) return result;
+        String mc = validateGameVersion(minecraftVersion == null ? "" : minecraftVersion.trim());
+        String loaderName = validateLoader(loader == null ? "" : loader);
+        List<String> all = new ArrayList<>(sha512Hashes);
+        for (String hash : all) {
+            if (hash == null || !hash.matches("[0-9a-f]{128}")) {
+                throw new ProviderException("One of the file checksums is not valid.");
+            }
+        }
+
+        // POST /version_files/update accepts many hashes at once; send them in chunks.
+        for (int from = 0; from < all.size(); from += 100) {
+            JsonArray hashes = new JsonArray();
+            for (String h : all.subList(from, Math.min(all.size(), from + 100))) hashes.add(h);
+            JsonArray loaders = new JsonArray();
+            loaders.add(loaderName);
+            JsonArray gameVersions = new JsonArray();
+            gameVersions.add(mc);
+
+            JsonObject body = new JsonObject();
+            body.add("hashes", hashes);
+            body.addProperty("algorithm", "sha512");
+            body.add("loaders", loaders);
+            body.add("game_versions", gameVersions);
+            if (releaseOnly) {
+                JsonArray types = new JsonArray();
+                types.add("release");
+                body.add("version_types", types);
+            }
+
+            JsonObject root = parseObject(post(baseUrl + "/version_files/update", body.toString()));
+            for (Map.Entry<String, JsonElement> entry : root.entrySet()) {
+                if (!entry.getValue().isJsonObject()) continue;
+                ProjectVersion v = toVersion(entry.getValue().getAsJsonObject());
+                if (v != null) result.put(entry.getKey().toLowerCase(Locale.ROOT), v);
+            }
+        }
+        return result;
+    }
+
     private static ProjectVersion toVersion(JsonObject o) {
         String id = string(o, "id");
         if (id == null) return null;
@@ -222,13 +269,27 @@ public final class ModrinthProvider implements ContentProvider {
     private String get(String url) {
         String cached = cache.get(url);
         if (cached != null) return cached;
-
         HttpRequest request = HttpRequest.newBuilder(URI.create(url))
                 .timeout(Duration.ofSeconds(20))
                 .header("User-Agent", userAgent(contact.get()))
                 .header("Accept", "application/json")
                 .GET().build();
+        return execute(request, url);
+    }
 
+    /** POST with a JSON body. Not cached: the answer depends on the files the user has right now. */
+    private String post(String url, String json) {
+        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+                .timeout(Duration.ofSeconds(30))
+                .header("User-Agent", userAgent(contact.get()))
+                .header("Accept", "application/json")
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8)).build();
+        return execute(request, null);
+    }
+
+    /** @param cacheKey where to cache a successful answer, or null to skip the cache */
+    private String execute(HttpRequest request, String cacheKey) {
         HttpResponse<String> response;
         try {
             response = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
@@ -240,10 +301,9 @@ public final class ModrinthProvider implements ContentProvider {
         }
 
         int status = response.statusCode();
-        log.info("GET {} -> {}", URI.create(url).getPath(), status);
+        log.info("{} {} -> {}", request.method(), request.uri().getPath(), status);
         if (status == 200) {
-            long ttl = cacheTtl.get().toNanos();
-            cache.put(url, response.body(), ttl);
+            if (cacheKey != null) cache.put(cacheKey, response.body(), cacheTtl.get().toNanos());
             return response.body();
         }
         throw switch (status) {

@@ -1,6 +1,6 @@
 # Minecraft Manager
 
-Status: Phases 1-5, Settings, Phase 6.1 (install mods) and 6.2 (installed mods list, safe removal).
+Status: Phases 1-5, Settings, Phase 6 (install, remove, update and roll back mods).
 
 ## Requirements
 - JDK 21 (jpackage on PATH: `jpackage --version`)
@@ -33,3 +33,9 @@ Instances page -> select an instance -> "Installed mods". Removing a mod moves i
 `<instance>/.removed/<time>/` (nothing is deleted), warns if other mods need it, and can also
 remove dependency-only mods that nothing else uses. To restore a mod, move the file back into
 `game/mods`.
+
+## Updating mods and rolling back (Phase 6.3)
+Instances page -> select an instance -> "Installed mods" -> "Check for updates". One request checks every
+mod in the instance by the hash of the file on disk. Select a mod with an arrow in the Update column and
+click "Update...", or use "Change version..." to pick any compatible version (including an older one to
+roll back). The plan is shown first; the old file moves to `.removed`, and a failed update changes nothing.

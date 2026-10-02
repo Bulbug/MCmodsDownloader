@@ -12,17 +12,22 @@ import app.api.SearchPage;
 import app.api.SearchQuery;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /** In-memory stand-in for Modrinth, so resolver tests need no network. */
-final class FakeProvider implements ContentProvider {
+class FakeProvider implements ContentProvider {
 
     final Map<String, List<ProjectVersion>> versionsByProject = new HashMap<>();
     final Map<String, ProjectVersion> versionsById = new HashMap<>();
     final Map<String, String> titles = new HashMap<>();
     boolean failProjectLookups;
+    /** What the batch update lookup returns, keyed by file hash. */
+    final Map<String, ProjectVersion> latestByHash = new HashMap<>();
+    int hashLookups;
+    Collection<String> lastHashes;
 
     /** Adds a version (newest should be added first). */
     ProjectVersion add(String projectId, String title, String versionId, String type,
@@ -79,5 +84,15 @@ final class FakeProvider implements ContentProvider {
         if (failProjectLookups || !titles.containsKey(projectId)) throw new ProviderException("Modrinth could not find that.");
         return new ProjectSummary(projectId, null, ProjectType.MOD, titles.get(projectId), "", "", null, 0, 0,
                 List.of(), List.of(), null, null);
+    }
+
+    @Override
+    public Map<String, ProjectVersion> latestVersionsForHashes(Collection<String> hashes, String mc, String loader,
+                                                                boolean releaseOnly) {
+        hashLookups++;
+        lastHashes = List.copyOf(hashes);
+        Map<String, ProjectVersion> result = new HashMap<>();
+        for (String h : hashes) if (latestByHash.containsKey(h)) result.put(h, latestByHash.get(h));
+        return result;
     }
 }

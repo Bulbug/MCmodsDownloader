@@ -341,4 +341,88 @@ class DependencyResolverTest {
         assertFalse(plan.canInstall());
         assertTrue(plan.problems().get(0).contains("more than"));
     }
+
+    // ---- update mode ------------------------------------------------------------------
+
+    private InstallPlan resolveUpdate(InstalledMod current, ProjectVersion target, List<InstalledMod> installed) {
+        return resolver.resolveUpdate(fabric, modsDir, installed, current, "Mod A", target, false);
+    }
+
+    @Test
+    void updatePlanReplacesTheModAndMayReuseItsFileName() throws IOException {
+        Files.createDirectories(modsDir);
+        Files.writeString(modsDir.resolve("a.jar"), "old version");
+        InstalledMod current = new InstalledMod("MODA", "Mod A", "a1", "1.0", "a.jar", null, true, 0, List.of(), List.of());
+        ProjectVersion next = provider.add("MODA", "Mod A", "a2", "release", MC, FABRIC, List.of(), jar("a.jar"));
+
+        InstallPlan plan = resolveUpdate(current, next, List.of(current));
+
+        assertTrue(plan.canInstall(), plan.problems().toString());
+        assertEquals(1, plan.toInstall().size());
+        assertEquals("a.jar", plan.toInstall().get(0).targetFileName());
+    }
+
+    @Test
+    void updatePlanPullsInNewRequiredDependencies() {
+        provider.add("FAPI", "Fabric API", "f1", "release", MC, FABRIC, List.of(), jar("fabric-api.jar"));
+        InstalledMod current = new InstalledMod("MODA", "Mod A", "a1", "1.0", "a-old.jar", null, true, 0, List.of(), List.of());
+        ProjectVersion next = provider.add("MODA", "Mod A", "a2", "release", MC, FABRIC,
+                List.of(required("FAPI")), jar("a-new.jar"));
+
+        InstallPlan plan = resolveUpdate(current, next, List.of(current));
+
+        assertTrue(plan.canInstall(), plan.problems().toString());
+        assertEquals(List.of("Mod A", "Fabric API"), plan.toInstall().stream().map(PlannedMod::title).toList());
+    }
+
+    @Test
+    void updatePlanKnowsADependencyIsAlreadyInstalled() {
+        provider.add("FAPI", "Fabric API", "f1", "release", MC, FABRIC, List.of(), jar("fabric-api.jar"));
+        InstalledMod fapi = new InstalledMod("FAPI", "Fabric API", "f1", "1", "fabric-api.jar", null, false, 0, List.of(), List.of());
+        InstalledMod current = new InstalledMod("MODA", "Mod A", "a1", "1.0", "a-old.jar", null, true, 0, List.of("FAPI"), List.of());
+        ProjectVersion next = provider.add("MODA", "Mod A", "a2", "release", MC, FABRIC,
+                List.of(required("FAPI")), jar("a-new.jar"));
+
+        InstallPlan plan = resolveUpdate(current, next, List.of(current, fapi));
+
+        assertTrue(plan.canInstall());
+        assertEquals(1, plan.toInstall().size());
+        assertEquals(1, plan.alreadyInstalled().size());
+    }
+
+    @Test
+    void updatePlanRefusesTheSameVersionAndOtherProjects() {
+        InstalledMod current = new InstalledMod("MODA", "Mod A", "a1", "1.0", "a.jar", null, true, 0, List.of(), List.of());
+        ProjectVersion same = provider.add("MODA", "Mod A", "a1", "release", MC, FABRIC, List.of(), jar("a.jar"));
+        assertFalse(resolveUpdate(current, same, List.of(current)).canInstall());
+
+        ProjectVersion other = provider.add("MODB", "Mod B", "b1", "release", MC, FABRIC, List.of(), jar("b.jar"));
+        assertFalse(resolveUpdate(current, other, List.of(current)).canInstall());
+    }
+
+    @Test
+    void updatePlanStillChecksCompatibilityAndIncompatibleMods() {
+        InstalledMod current = new InstalledMod("MODA", "Mod A", "a1", "1.0", "a.jar", null, true, 0, List.of(), List.of());
+        ProjectVersion wrongMc = provider.add("MODA", "Mod A", "a2", "release", List.of("1.20.1"), FABRIC, List.of(), jar("a2.jar"));
+        assertFalse(resolveUpdate(current, wrongMc, List.of(current)).canInstall());
+
+        InstalledMod rival = new InstalledMod("RIVAL", "Rival", "r1", "1", "r.jar", null, true, 0, List.of(), List.of("MODA"));
+        ProjectVersion ok = provider.add("MODA", "Mod A", "a3", "release", MC, FABRIC, List.of(), jar("a3.jar"));
+        InstallPlan plan = resolveUpdate(current, ok, List.of(current, rival));
+        assertFalse(plan.canInstall());
+        assertTrue(plan.problems().get(0).contains("Rival is incompatible"));
+    }
+
+    @Test
+    void updateStillRefusesToOverwriteSomeoneElsesFile() throws IOException {
+        Files.createDirectories(modsDir);
+        Files.writeString(modsDir.resolve("taken.jar"), "user file");
+        InstalledMod current = new InstalledMod("MODA", "Mod A", "a1", "1.0", "a.jar", null, true, 0, List.of(), List.of());
+        ProjectVersion next = provider.add("MODA", "Mod A", "a2", "release", MC, FABRIC, List.of(), jar("taken.jar"));
+
+        InstallPlan plan = resolveUpdate(current, next, List.of(current));
+
+        assertFalse(plan.canInstall());
+        assertTrue(plan.problems().get(0).contains("already exists"));
+    }
 }

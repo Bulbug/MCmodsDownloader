@@ -1,13 +1,21 @@
 package app.ui;
 
+import app.api.ProjectVersion;
+import app.configuration.AppContext;
 import app.instance.Instance;
+import app.mods.DependencyResolver;
 import app.mods.InstallException;
+import app.mods.InstallPlan;
+import app.mods.InstalledContentStore;
+import app.mods.ModInstaller;
+import app.mods.UpdateChecker;
 import app.mods.InstalledMod;
 import app.mods.ManagedMod;
 import app.mods.ModManager;
 import app.mods.RemovalPlan;
 import app.mods.RemovalResult;
 import javafx.beans.property.ReadOnlyStringWrapper;
+import javafx.application.Platform;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
@@ -16,6 +24,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.ChoiceDialog;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.TableColumn;
@@ -28,6 +37,9 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
@@ -38,6 +50,7 @@ final class InstalledModsDialog {
 
     private static final Logger log = LoggerFactory.getLogger("UI");
 
+    private final AppContext context;
     private final Instance instance;
     private final Path instanceDir;
     private final Node anchor;
@@ -46,9 +59,16 @@ final class InstalledModsDialog {
     private final TableView<ManagedMod> table = new TableView<>();
     private final Label status = new Label();
     private final Button removeButton = new Button("Remove...");
+    private final Button checkButton = new Button("Check for updates");
+    private final Button updateButton = new Button("Update...");
+    private final Button versionButton = new Button("Change version...");
+    private final CheckBox preRelease = new CheckBox("Include beta and alpha");
+    private final Map<String, UpdateChecker.Candidate> updates = new HashMap<>();
+    private boolean busy;
     private final Dialog<Void> dialog = new Dialog<>();
 
-    InstalledModsDialog(Instance instance, Path instanceDir, Node anchor) {
+    InstalledModsDialog(AppContext context, Instance instance, Path instanceDir, Node anchor) {
+        this.context = context;
         this.instance = instance;
         this.instanceDir = instanceDir;
         this.anchor = anchor;
@@ -67,16 +87,23 @@ final class InstalledModsDialog {
         table.getColumns().add(column("Name", 200, ManagedMod::title));
         table.getColumns().add(column("Version", 110, ManagedMod::versionNumber));
         table.getColumns().add(column("Source", 170, InstalledModsDialog::source));
-        table.getColumns().add(column("File", 220, ManagedMod::fileName));
+        table.getColumns().add(column("File", 200, ManagedMod::fileName));
+        table.getColumns().add(column("Update", 130, m -> {
+            UpdateChecker.Candidate c = m.projectId() == null ? null : updates.get(m.projectId());
+            return c == null ? "" : "-> " + c.latest().versionNumber();
+        }));
         table.getColumns().add(column("Size", 80, m -> m.fileExists() ? Formats.bytes(m.sizeBytes()) : "-"));
-        table.setPrefSize(820, 340);
-        table.getSelectionModel().selectedItemProperty().addListener((o, a, b) -> removeButton.setDisable(b == null));
-        removeButton.setDisable(true);
+        table.setPrefSize(940, 340);
+        table.getSelectionModel().selectedItemProperty().addListener((o, a, b) -> updateButtons());
+        updateButtons();
 
         Button refresh = new Button("Refresh");
         Button openMods = new Button("Open mods folder");
         Button openRemoved = new Button("Open removed files");
         removeButton.setOnAction(e -> onRemove());
+        checkButton.setOnAction(e -> onCheckUpdates());
+        updateButton.setOnAction(e -> onUpdate());
+        versionButton.setOnAction(e -> onChangeVersion());
         refresh.setOnAction(e -> load());
         openMods.setOnAction(e -> FolderOpener.open(instanceDir.resolve("game").resolve("mods"), status::setText));
         openRemoved.setOnAction(e -> {
@@ -91,7 +118,8 @@ final class InstalledModsDialog {
         note.getStyleClass().add("page-muted");
         note.setWrapText(true);
 
-        VBox content = new VBox(8, new HBox(8, removeButton, refresh, openMods, openRemoved), table, note, status);
+        VBox content = new VBox(8, new HBox(8, removeButton, refresh, openMods, openRemoved),
+                new HBox(8, checkButton, preRelease, updateButton, versionButton), table, note, status);
         content.setPadding(new Insets(6));
         dialog.getDialogPane().setContent(content);
         dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
@@ -174,6 +202,166 @@ final class InstalledModsDialog {
         });
     }
 
+    private void updateButtons() {
+        ManagedMod m = table.getSelectionModel().getSelectedItem();
+        boolean tracked = m != null && m.tracked() && m.fileExists();
+        removeButton.setDisable(busy || m == null);
+        checkButton.setDisable(busy);
+        updateButton.setDisable(busy || !tracked || m.projectId() == null || !updates.containsKey(m.projectId()));
+        versionButton.setDisable(busy || !tracked);
+    }
+
+    private void setBusy(boolean value) {
+        busy = value;
+        updateButtons();
+    }
+
+    private void onCheckUpdates() {
+        status.setText("Checking for updates...");
+        setBusy(true);
+        background(() -> new UpdateChecker(context.content()).check(instanceDir, instance, preRelease.isSelected()),
+                report -> {
+                    updates.clear();
+                    for (UpdateChecker.Candidate c : report.updates()) updates.put(c.installed().projectId(), c);
+                    table.refresh();
+                    status.setText(report.updates().isEmpty()
+                            ? "Everything checked is up to date."
+                            : report.updates().size() + " update" + (report.updates().size() == 1 ? "" : "s")
+                            + " available. Select a mod and click Update...");
+                    if (!report.notChecked().isEmpty()) {
+                        status.setText(status.getText() + "  (" + report.notChecked().size()
+                                + " could not be checked)");
+                    }
+                    setBusy(false);
+                });
+    }
+
+    private void onUpdate() {
+        ManagedMod selected = table.getSelectionModel().getSelectedItem();
+        if (selected == null || selected.projectId() == null) return;
+        UpdateChecker.Candidate candidate = updates.get(selected.projectId());
+        if (candidate != null) planChange(candidate.installed(), candidate.latest(), preRelease.isSelected());
+    }
+
+    /** Lets the user pick any compatible version: newer, or older to roll back. */
+    private void onChangeVersion() {
+        ManagedMod selected = table.getSelectionModel().getSelectedItem();
+        if (selected == null || selected.projectId() == null) return;
+        InstalledMod current = new InstalledContentStore(instanceDir).load().stream()
+                .filter(m -> m.projectId().equals(selected.projectId())).findFirst().orElse(null);
+        if (current == null) return;
+
+        status.setText("Loading versions...");
+        setBusy(true);
+        background(() -> context.content().versions(current.projectId(), instance.minecraftVersion(),
+                instance.loader().toLowerCase()), versions -> {
+            setBusy(false);
+            status.setText("");
+            List<ProjectVersion> choices = versions.stream().filter(v -> !v.id().equals(current.versionId())).toList();
+            if (choices.isEmpty()) {
+                status.setText("There is no other version of " + current.title() + " for Minecraft "
+                        + instance.minecraftVersion() + " with " + instance.loader() + ".");
+                return;
+            }
+            ChoiceDialog<ProjectVersion> chooser = new ChoiceDialog<>(choices.get(0), choices);
+            chooser.setTitle("Change version");
+            chooser.setHeaderText("Installed: " + current.title() + " " + current.versionNumber()
+                    + "\nChoose the version to switch to (newest first):");
+            chooser.setContentText("Version:");
+            chooser.getDialogPane().getStylesheets().addAll(anchor.getScene().getStylesheets());
+            chooser.initOwner(dialog.getDialogPane().getScene().getWindow());
+            // Show "2.0.1 (release, 2026-05-01)" instead of the raw record text.
+            @SuppressWarnings("unchecked")
+            javafx.scene.control.ComboBox<ProjectVersion> combo =
+                    (javafx.scene.control.ComboBox<ProjectVersion>) chooser.getDialogPane().lookup(".combo-box");
+            if (combo != null) {
+                javafx.util.StringConverter<ProjectVersion> converter = new javafx.util.StringConverter<>() {
+                    @Override
+                    public String toString(ProjectVersion v) {
+                        return v == null ? "" : v.versionNumber() + "  (" + v.versionType() + ", "
+                                + (v.datePublished() == null ? "?" : v.datePublished().substring(0, Math.min(10, v.datePublished().length())))
+                                + ")";
+                    }
+
+                    @Override
+                    public ProjectVersion fromString(String s) {
+                        return null;
+                    }
+                };
+                combo.setConverter(converter);
+            }
+            chooser.showAndWait().ifPresent(v -> planChange(current, v, true));
+        });
+    }
+
+    private void planChange(InstalledMod current, ProjectVersion target, boolean allowPre) {
+        status.setText("Checking compatibility and dependencies...");
+        setBusy(true);
+        background(() -> new DependencyResolver(context.content()).resolveUpdate(instance,
+                        instanceDir.resolve("game").resolve("mods"), new InstalledContentStore(instanceDir).load(),
+                        current, current.title(), target, allowPre),
+                plan -> {
+                    setBusy(false);
+                    status.setText("");
+                    confirmChange(plan, current, target);
+                });
+    }
+
+    private void confirmChange(InstallPlan plan, InstalledMod current, ProjectVersion target) {
+        Dialog<ButtonType> confirm = new Dialog<>();
+        confirm.setTitle("Change version");
+        confirm.setHeaderText(plan.canInstall()
+                ? "Replace " + current.title() + " " + current.versionNumber() + " with " + target.versionNumber() + "?"
+                : "Cannot change the version of " + current.title());
+        confirm.getDialogPane().getStylesheets().addAll(anchor.getScene().getStylesheets());
+        confirm.initOwner(dialog.getDialogPane().getScene().getWindow());
+        String older = target.datePublished() != null && current.publishedAt() != null
+                && target.datePublished().compareTo(current.publishedAt()) < 0
+                ? "This is an OLDER version than the one you have.\n\n" : "";
+        TextArea text = new TextArea(older + InstallFlow.describe(plan)
+                + (plan.canInstall() ? "\n\nThe current file is moved to the .removed folder, so you can restore it by hand." : ""));
+        text.setEditable(false);
+        text.setWrapText(true);
+        text.setPrefSize(560, 280);
+        confirm.getDialogPane().setContent(text);
+        ButtonType apply = new ButtonType("Replace", ButtonBar.ButtonData.OK_DONE);
+        if (plan.canInstall()) confirm.getDialogPane().getButtonTypes().add(apply);
+        confirm.getDialogPane().getButtonTypes().add(plan.canInstall() ? ButtonType.CANCEL : ButtonType.CLOSE);
+
+        Optional<ButtonType> answer = confirm.showAndWait();
+        if (answer.isEmpty() || answer.get() != apply) return;
+
+        setBusy(true);
+        Task<Integer> task = new Task<>() {
+            @Override
+            protected Integer call() {
+                return new ModInstaller(context.downloads()).update(plan, current, instanceDir, () -> false,
+                        msg -> Platform.runLater(() -> status.setText(msg))).size();
+            }
+        };
+        task.setOnSucceeded(e -> {
+            updates.remove(current.projectId());
+            status.setText("Updated " + current.title() + " to " + target.versionNumber() + ".");
+            setBusy(false);
+            load();
+        });
+        task.setOnFailed(e -> {
+            setBusy(false);
+            Throwable error = task.getException();
+            String message = error instanceof InstallException ? error.getMessage()
+                    : "Something went wrong. Details were written to the log file.";
+            if (!(error instanceof InstallException)) log.error("Update failed", error);
+            status.setText(message);
+            Alert alert = new Alert(Alert.AlertType.ERROR, message, ButtonType.CLOSE);
+            alert.setHeaderText("The version was not changed");
+            alert.getDialogPane().getStylesheets().addAll(anchor.getScene().getStylesheets());
+            alert.show();
+        });
+        Thread thread = new Thread(task, "mod-update");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
     private <T> void background(Callable<T> work, Consumer<T> onSuccess) {
         Task<T> task = new Task<>() {
             @Override
@@ -185,10 +373,12 @@ final class InstalledModsDialog {
         task.setOnFailed(e -> {
             Throwable error = task.getException();
             boolean friendly = error instanceof InstallException
-                    || error instanceof app.instance.InstanceException;
+                    || error instanceof app.instance.InstanceException
+                    || error instanceof app.api.ProviderException;
             if (!friendly) log.error("Unexpected error in installed mods window", error);
-            String message = friendly ? error.getMessage()
+            String message = friendly || error instanceof app.api.ProviderException ? error.getMessage()
                     : "Something went wrong. Details were written to the log file.";
+            setBusy(false);
             status.setText(message);
             Alert alert = new Alert(Alert.AlertType.ERROR, message, ButtonType.CLOSE);
             alert.setHeaderText("That did not work");

@@ -47,8 +47,30 @@ public final class DependencyResolver {
 
     public InstallPlan resolve(Instance instance, Path modsDir, List<InstalledMod> installed,
                                String rootTitle, ProjectVersion root, boolean allowPreRelease) {
-        Run run = new Run(instance, modsDir, installed, allowPreRelease);
+        Run run = new Run(instance, modsDir, installed, allowPreRelease, null);
         run.go(rootTitle, root);
+        return new InstallPlan(instance, List.copyOf(run.planned.values()), run.alreadyInstalled,
+                run.optional, run.warnings, run.problems);
+    }
+
+    /**
+     * Plan for replacing an installed mod with another version of itself (an update or a rollback).
+     * The current version is treated as gone, so its file name may be reused and its own record
+     * does not count as "already installed". Any new required mods are planned as usual.
+     */
+    public InstallPlan resolveUpdate(Instance instance, Path modsDir, List<InstalledMod> installed,
+                                     InstalledMod current, String title, ProjectVersion target,
+                                     boolean allowPreRelease) {
+        List<InstalledMod> others = installed.stream()
+                .filter(m -> !m.projectId().equals(current.projectId())).toList();
+        Run run = new Run(instance, modsDir, others, allowPreRelease, current.fileName());
+        if (!current.projectId().equals(target.projectId())) {
+            run.problems.add("That version belongs to a different project.");
+        } else if (current.versionId().equals(target.id())) {
+            run.problems.add(title + " " + current.versionNumber() + " is already installed.");
+        } else {
+            run.go(title, target);
+        }
         return new InstallPlan(instance, List.copyOf(run.planned.values()), run.alreadyInstalled,
                 run.optional, run.warnings, run.problems);
     }
@@ -59,6 +81,7 @@ public final class DependencyResolver {
         final Path modsDir;
         final boolean allowPreRelease;
         final String loader;
+        final String replacingFile;
         final Map<String, InstalledMod> installedByProject = new HashMap<>();
         final List<InstalledMod> installed;
         final Map<String, PlannedMod> planned = new LinkedHashMap<>();
@@ -69,7 +92,9 @@ public final class DependencyResolver {
         final List<String> warnings = new ArrayList<>();
         final List<String> problems = new ArrayList<>();
 
-        Run(Instance instance, Path modsDir, List<InstalledMod> installed, boolean allowPreRelease) {
+        Run(Instance instance, Path modsDir, List<InstalledMod> installed, boolean allowPreRelease,
+            String replacingFile) {
+            this.replacingFile = replacingFile;
             this.instance = instance;
             this.modsDir = modsDir;
             this.installed = installed;
@@ -224,7 +249,8 @@ public final class DependencyResolver {
                         + "), so it is not installed as a mod.");
                 return false;
             }
-            if (Files.exists(modsDir.resolve(fileName))) {
+            boolean reusesReplacedName = replacingFile != null && replacingFile.equalsIgnoreCase(fileName);
+            if (!reusesReplacedName && Files.exists(modsDir.resolve(fileName))) {
                 problems.add("A file named \"" + fileName + "\" already exists in this instance's mods folder "
                         + "and was not installed by this app. Move or rename it first.");
                 return false;

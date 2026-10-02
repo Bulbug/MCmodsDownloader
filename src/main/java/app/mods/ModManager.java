@@ -218,7 +218,7 @@ public final class ModManager {
         return null;
     }
 
-    private Path newRemovedFolder(Path instanceDir) throws IOException {
+    static Path newRemovedFolder(Path instanceDir) throws IOException {
         Path base = instanceDir.resolve(REMOVED_FOLDER);
         String stamp = LocalDateTime.now().format(STAMP);
         Path dir = base.resolve(stamp);

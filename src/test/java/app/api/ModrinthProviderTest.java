@@ -3,6 +3,8 @@ package app.api;
 import app.api.ProjectVersion.DependencyType;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -15,6 +17,7 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -66,6 +69,8 @@ class ModrinthProviderTest {
     private volatile String lastPath;
     private volatile String lastQuery;
     private volatile String lastUserAgent;
+    private volatile String lastMethod;
+    private volatile String lastBody;
     private volatile int forcedStatus = 200;
     private volatile String forcedBody;
     private volatile String forcedResetHeader;
@@ -95,6 +100,8 @@ class ModrinthProviderTest {
         lastPath = ex.getRequestURI().getPath();
         lastQuery = ex.getRequestURI().getRawQuery();
         lastUserAgent = ex.getRequestHeaders().getFirst("User-Agent");
+        lastMethod = ex.getRequestMethod();
+        lastBody = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
 
         String body = forcedBody != null ? forcedBody
                 : lastPath.endsWith("/search") ? SEARCH_JSON : VERSIONS_JSON;
@@ -262,6 +269,80 @@ class ModrinthProviderTest {
         forcedBody = "{\"slug\":\"no-title-or-id\"}";
         assertThrows(ProviderException.class, () -> provider.project("CCCC3333"));
         assertThrows(ProviderException.class, () -> provider.project("bad/id"));
+    }
+
+    // ---- batch update lookup -------------------------------------------------------------
+
+    private static String hash(char c) {
+        return String.valueOf(c).repeat(128);
+    }
+
+    @Test
+    void updateLookupPostsHashesAndParsesTheMapByHash() {
+        forcedBody = "{\"" + hash('a') + "\":{\"id\":\"ver-new\",\"project_id\":\"AAAA1111\",\"name\":\"N\","
+                + "\"version_number\":\"2.0\",\"version_type\":\"release\",\"game_versions\":[\"1.21.8\"],"
+                + "\"loaders\":[\"fabric\"],\"date_published\":\"2026-05-01T10:00:00Z\",\"dependencies\":[],\"files\":[]}}";
+
+        Map<String, ProjectVersion> result = provider.latestVersionsForHashes(
+                List.of(hash('a'), hash('b')), "1.21.8", "Fabric", true);
+
+        assertEquals("POST", lastMethod);
+        assertEquals("/v2/version_files/update", lastPath);
+        JsonObject body = JsonParser.parseString(lastBody).getAsJsonObject();
+        assertEquals("sha512", body.get("algorithm").getAsString());
+        assertEquals(2, body.getAsJsonArray("hashes").size());
+        assertEquals("fabric", body.getAsJsonArray("loaders").get(0).getAsString());
+        assertEquals("1.21.8", body.getAsJsonArray("game_versions").get(0).getAsString());
+        assertEquals("release", body.getAsJsonArray("version_types").get(0).getAsString());
+        assertEquals("MinecraftManager/0.1.0 (tester@example.com)", lastUserAgent);
+
+        assertEquals(1, result.size()); // the second hash is unknown to the server and is simply absent
+        assertEquals("ver-new", result.get(hash('a')).id());
+    }
+
+    @Test
+    void updateLookupOmitsTheVersionTypeFilterWhenBetasAreAllowed() {
+        forcedBody = "{}";
+        provider.latestVersionsForHashes(List.of(hash('a')), "1.21.8", "fabric", false);
+        assertFalse(JsonParser.parseString(lastBody).getAsJsonObject().has("version_types"));
+    }
+
+    @Test
+    void updateLookupSplitsLargeBatchesAndSkipsEmptyOnes() {
+        forcedBody = "{}";
+        assertTrue(provider.latestVersionsForHashes(List.of(), "1.21.8", "fabric", true).isEmpty());
+        assertEquals(0, hits.get());
+
+        List<String> many = new java.util.ArrayList<>();
+        for (int i = 0; i < 150; i++) many.add(String.format("%0128x", i));
+        provider.latestVersionsForHashes(many, "1.21.8", "fabric", true);
+        assertEquals(2, hits.get()); // 100 + 50
+    }
+
+    @Test
+    void updateLookupRejectsBadInputBeforeSendingAnything() {
+        assertThrows(ProviderException.class, () -> provider.latestVersionsForHashes(
+                List.of("not-a-hash"), "1.21.8", "fabric", true));
+        assertThrows(ProviderException.class, () -> provider.latestVersionsForHashes(
+                List.of(hash('a')), "1.21\"", "fabric", true));
+        assertThrows(ProviderException.class, () -> provider.latestVersionsForHashes(
+                List.of(hash('a')), "1.21.8", "bukkit", true));
+        assertEquals(0, hits.get());
+    }
+
+    @Test
+    void updateLookupIsNotCachedBecauseFilesChange() {
+        forcedBody = "{}";
+        provider.latestVersionsForHashes(List.of(hash('a')), "1.21.8", "fabric", true);
+        provider.latestVersionsForHashes(List.of(hash('a')), "1.21.8", "fabric", true);
+        assertEquals(2, hits.get());
+    }
+
+    @Test
+    void updateLookupReportsRateLimits() {
+        forcedStatus = 429;
+        assertTrue(assertThrows(ProviderException.class, () -> provider.latestVersionsForHashes(
+                List.of(hash('a')), "1.21.8", "fabric", true)).getMessage().contains("limiting"));
     }
 
     // ---- errors ----------------------------------------------------------------------

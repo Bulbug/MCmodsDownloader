@@ -200,4 +200,122 @@ class ModInstallerTest {
         assertThrows(InstallException.class, () ->
                 new ModInstaller(downloads).install(bad, instanceDir, () -> false, m -> { }));
     }
+
+    // ---- updates and rollbacks ----------------------------------------------------------
+
+    private InstalledMod existingMod(String projectId, String fileName, String content, boolean explicit) throws IOException {
+        Files.createDirectories(mods());
+        Files.writeString(mods().resolve(fileName), content);
+        InstalledMod record = new InstalledMod(projectId, "Mod " + projectId, "old-" + projectId, "1.0", fileName,
+                null, explicit, 1L, List.of(), List.of(), "2026-01-01T00:00:00Z");
+        InstalledContentStore store = new InstalledContentStore(instanceDir);
+        List<InstalledMod> all = store.load();
+        all.add(record);
+        store.save(all);
+        return record;
+    }
+
+    @Test
+    void updateReplacesTheFileKeepsTheOldOneRecoverableAndPreservesTheChoice() throws Exception {
+        InstalledMod old = existingMod("P1", "a-1.0.jar", "OLD", true);
+        InstallPlan plan = plan(planned("P1", "Mod P1", "a-2.0.jar", bytes("NEW"), true, false, null));
+
+        List<InstalledMod> added = new ModInstaller(downloads).update(plan, old, instanceDir, () -> false, m -> { });
+
+        assertEquals(1, added.size());
+        assertFalse(Files.exists(mods().resolve("a-1.0.jar")));
+        assertEquals("NEW", Files.readString(mods().resolve("a-2.0.jar")));
+
+        Path removedRoot = instanceDir.resolve(ModManager.REMOVED_FOLDER);
+        try (var stamps = Files.list(removedRoot)) {
+            Path kept = stamps.findFirst().orElseThrow().resolve("a-1.0.jar");
+            assertEquals("OLD", Files.readString(kept));
+        }
+
+        List<InstalledMod> saved = new InstalledContentStore(instanceDir).load();
+        assertEquals(1, saved.size());
+        assertEquals("ver-P1", saved.get(0).versionId());
+        assertTrue(saved.get(0).explicit(), "a mod the user chose stays chosen after an update");
+        assertEquals("2026-01-01T00:00:00Z", saved.get(0).publishedAt()); // from the new version
+    }
+
+    @Test
+    void updateKeepsADependencyAsADependency() throws Exception {
+        InstalledMod old = existingMod("LIB", "lib-1.jar", "OLD", false);
+        InstallPlan plan = plan(planned("LIB", "Mod LIB", "lib-2.jar", bytes("NEW"), true, false, null));
+
+        new ModInstaller(downloads).update(plan, old, instanceDir, () -> false, m -> { });
+
+        assertFalse(new InstalledContentStore(instanceDir).load().get(0).explicit());
+    }
+
+    @Test
+    void updateCanReuseTheSameFileName() throws Exception {
+        InstalledMod old = existingMod("P1", "a.jar", "OLD", true);
+        InstallPlan plan = plan(planned("P1", "Mod P1", "a.jar", bytes("NEW"), true, false, null));
+
+        new ModInstaller(downloads).update(plan, old, instanceDir, () -> false, m -> { });
+
+        assertEquals("NEW", Files.readString(mods().resolve("a.jar")));
+    }
+
+    @Test
+    void updateAlsoInstallsNewDependenciesAndKeepsOtherRecords() throws Exception {
+        existingMod("OTHER", "other.jar", "untouched", true);
+        InstalledMod old = existingMod("P1", "a-1.jar", "OLD", true);
+        InstallPlan plan = plan(planned("P1", "Mod P1", "a-2.jar", bytes("NEW"), true, false, null),
+                planned("DEP", "Mod DEP", "dep.jar", bytes("DEP"), false, false, null));
+
+        new ModInstaller(downloads).update(plan, old, instanceDir, () -> false, m -> { });
+
+        List<InstalledMod> saved = new InstalledContentStore(instanceDir).load();
+        assertEquals(3, saved.size());
+        assertEquals("untouched", Files.readString(mods().resolve("other.jar")));
+        assertFalse(saved.stream().filter(m -> m.projectId().equals("DEP")).findFirst().orElseThrow().explicit());
+    }
+
+    @Test
+    void aFailedDownloadLeavesTheOldVersionInPlace() throws Exception {
+        InstalledMod old = existingMod("P1", "a-1.0.jar", "OLD", true);
+        PlannedMod broken = planned("P1", "Mod P1", "a-2.0.jar", bytes("NEW"), true, false, null);
+        files.remove("a-2.0.jar");
+
+        assertThrows(InstallException.class, () ->
+                new ModInstaller(downloads).update(plan(broken), old, instanceDir, () -> false, m -> { }));
+
+        assertEquals("OLD", Files.readString(mods().resolve("a-1.0.jar")));
+        assertFalse(Files.exists(mods().resolve("a-2.0.jar")));
+        assertEquals("old-P1", new InstalledContentStore(instanceDir).load().get(0).versionId());
+        assertFalse(Files.exists(instanceDir.resolve(ModManager.REMOVED_FOLDER)));
+    }
+
+    @Test
+    void ifTheRecordCannotBeSavedTheOldVersionComesBackAndTheNewOneIsRemoved() throws Exception {
+        InstalledMod old = existingMod("P1", "a-1.0.jar", "OLD", true);
+        PlannedMod next = planned("P1", "Mod P1", "a-2.0.jar", bytes("NEW"), true, false, null);
+        // Make saving the record fail: a directory occupies the temp-file name the store writes to.
+        Files.createDirectories(instanceDir.resolve("installed-content.json.tmp"));
+
+        assertThrows(InstallException.class, () ->
+                new ModInstaller(downloads).update(plan(next), old, instanceDir, () -> false, m -> { }));
+
+        assertEquals("OLD", Files.readString(mods().resolve("a-1.0.jar")));
+        assertFalse(Files.exists(mods().resolve("a-2.0.jar")));
+        assertEquals("old-P1", new InstalledContentStore(instanceDir).load().get(0).versionId());
+    }
+
+    @Test
+    void cancellingAnUpdateChangesNothing() throws Exception {
+        InstalledMod old = existingMod("P1", "a-1.0.jar", "OLD", true);
+        PlannedMod slow = planned("P1", "Mod P1", "a-2.0.jar", new byte[200_000], true, true, null);
+        AtomicBoolean cancel = new AtomicBoolean(false);
+
+        assertThrows(InstallException.class, () ->
+                new ModInstaller(downloads).update(plan(slow), old, instanceDir, cancel::get, message -> {
+                    if (message.startsWith("Downloading")) cancel.set(true);
+                }));
+
+        assertEquals("OLD", Files.readString(mods().resolve("a-1.0.jar")));
+        assertFalse(Files.exists(instanceDir.resolve(".staging")));
+    }
 }

@@ -43,6 +43,7 @@ public final class InstancesView {
     private static final DateTimeFormatter DATE =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault());
 
+    private final AppContext context;
     private final InstanceService service;
     private final Path root;
     private final Supplier<List<String>> knownVersions;
@@ -59,6 +60,7 @@ public final class InstancesView {
     private final Button refreshButton = new Button("Refresh");
 
     public InstancesView(AppContext context, Supplier<List<String>> knownVersions) {
+        this.context = context;
         this.knownVersions = knownVersions;
         this.root = context.paths().instancesDirFor(context.settings());
         this.service = new InstanceService(new FileInstanceRepository(root));
@@ -176,7 +178,7 @@ public final class InstancesView {
         Instance selected = selected();
         if (selected == null) return;
         runAsync(() -> service.folderOf(selected.id()),
-                folder -> new InstalledModsDialog(selected, folder, box).show());
+                folder -> new InstalledModsDialog(context, selected, folder, box).show());
     }
 
     private void onOpenFolder() {
