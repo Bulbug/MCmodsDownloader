@@ -22,3 +22,13 @@ export const PLUGIN_LOADERS = {
 export const PLUGIN_NAMES = { paper: 'Paper', purpur: 'Purpur', spigot: 'Spigot', folia: 'Folia' }
 // The Modrinth loader names to filter by for a type + chosen loader/platform.
 export const loaderSet = (type, loader) => (type === 'plugin' ? PLUGIN_LOADERS[loader] || [loader] : [loader])
+
+// Modrinth category filters offered as chips for each content type.
+export const CATS = {
+  mod: ['optimization', 'library', 'utility', 'decoration', 'adventure', 'technology', 'magic', 'worldgen', 'mobs', 'equipment'],
+  plugin: ['management', 'economy', 'utility', 'game-mechanics', 'minigame', 'social', 'library', 'optimization'],
+  resourcepack: ['vanilla-like', 'realistic', 'simplistic', 'themed', 'cursed', 'combat', 'utility', 'decoration'],
+  datapack: ['adventure', 'game-mechanics', 'magic', 'technology', 'worldgen', 'utility', 'decoration', 'mobs'],
+  shader: ['vanilla-like', 'semi-realistic', 'realistic', 'fantasy', 'cartoon', 'cursed'],
+  modpack: ['adventure', 'technology', 'magic', 'lightweight', 'multiplayer', 'quests', 'combat', 'optimization'],
+}

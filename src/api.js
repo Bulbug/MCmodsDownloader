@@ -16,10 +16,11 @@ export const gameVersions = async () =>
 // Only mods and modpacks are filtered by loader; resource packs, shaders and data packs are not.
 export const versionsPath = (id, gv, type, loader) =>
   `/project/${id}/version?game_versions=${enc([gv])}${T[typeOf(type)].loader ? `&loaders=${enc(loaderSet(typeOf(type), loader))}` : ''}`
-export function search({ query, version, loader, sort, offset, type }, signal) {
+export function search({ query, version, loader, sort, offset, type, category }, signal) {
   const t = typeOf(type)
   const facets = [[`project_type:${T[t].ptype || t}`], [`versions:${version}`]]
   if (T[t].loader) facets.push(loaderSet(t, loader).map((c) => `categories:${c}`))
+  if (category) facets.push([`categories:${category}`])
   return j(`/search?query=${encodeURIComponent(query)}&facets=${enc(facets)}&index=${sort}&offset=${offset}&limit=20`, signal)
 }
 const noRelease = (type, loader, gv) => `No ${T[type].loader ? loader + ' ' : ''}release for Minecraft ${gv}`

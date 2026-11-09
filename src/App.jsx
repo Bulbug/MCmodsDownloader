@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import JSZip from 'jszip'
-import { Search, Package, Download, Trash2, Plus, Check, AlertTriangle, ExternalLink, Loader2, Heart, Settings, Info, Sun, Moon, Bookmark, ListChecks, Box, Boxes, Paintbrush, Braces, Glasses, Plug } from 'lucide-react'
+import { Search, Package, Download, Trash2, Plus, Check, AlertTriangle, ExternalLink, Loader2, Heart, Settings, Info, Sun, Moon, Bookmark, Box, Boxes, Paintbrush, Braces, Glasses, Plug, ChevronLeft, ChevronRight } from 'lucide-react'
 import Details from './Details.jsx'
 import { gameVersions, search, resolve, mrpackToMods, j, versionsPath } from './api.js'
-import { TYPES, T, typeOf, PLUGIN_LOADERS, PLUGIN_NAMES } from './types.js'
+import { TYPES, T, typeOf, PLUGIN_LOADERS, PLUGIN_NAMES, CATS } from './types.js'
 
 const LOADERS = ['fabric', 'forge', 'neoforge', 'quilt']
 const LOADER_NAMES = { fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt' }
@@ -22,8 +22,15 @@ function validPack(d) {
 const CONFLICTS = [['starlight', 'scalablelux'], ['starlight', 'phosphor'], ['scalablelux', 'phosphor'], ['lithium', 'canary'], ['sodium', 'embeddium'], ['sodium', 'rubidium'], ['embeddium', 'rubidium'], ['iris', 'oculus']]
 const PERF = { fabric: ['sodium', 'lithium', 'ferrite-core', 'modernfix', 'entityculling', 'immediatelyfast'], forge: ['embeddium', 'modernfix', 'ferrite-core', 'entityculling', 'immediatelyfast'] }
 PERF.quilt = PERF.fabric; PERF.neoforge = PERF.forge
+const PAGE_SIZE = 20, MAX_PAGES = 100
+// 1 … 4 5 [6] 7 8 … 40
+const pageList = (p, n) => {
+  const s = new Set([1, n, p - 1, p, p + 1, p === 1 ? 3 : 0, p === n ? n - 2 : 0])
+  const nums = [...s].filter((x) => x >= 1 && x <= n).sort((x, y) => x - y)
+  return nums.flatMap((x, i) => (i && x - nums[i - 1] > 1 ? (x - nums[i - 1] === 2 ? [x - 1, x] : ['…', x]) : [x]))
+}
 const TYPE_ICONS = { mod: <Box size={16} />, resourcepack: <Paintbrush size={16} />, datapack: <Braces size={16} />, shader: <Glasses size={16} />, modpack: <Boxes size={16} />, plugin: <Plug size={16} /> }
-const NAV = [['selection', 'My selection', ListChecks], ['packs', 'Saved modpacks', Bookmark], ['favorites', 'Favorites', Heart], ['settings', 'Settings', Settings], ['about', 'About', Info]]
+const NAV = [['packs', 'Saved modpacks', Bookmark], ['favorites', 'Favorites', Heart], ['settings', 'Settings', Settings], ['about', 'About', Info]]
 const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('')
 function save(blob, name) {
   const url = URL.createObjectURL(blob)
@@ -43,6 +50,9 @@ export default function App() {
   const [sort, setSort] = useState('downloads')
   const [hits, setHits] = useState([])
   const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [category, setCategory] = useState('')
+  const searchRef = useRef(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [tick, setTick] = useState(0)
@@ -72,18 +82,37 @@ export default function App() {
   const loaderLabel = isPlugin ? PLUGIN_NAMES[ploader] : LOADER_NAMES[loader]
   useEffect(() => { localStorage.setItem('div.selected', JSON.stringify(selected)) }, [selected])
 
-  const runSearch = (offset, append) => {
+  const runSearch = (offset) => {
     if (!version) return
     abort.current?.abort()
     const ac = (abort.current = new AbortController())
     setBusy(true); setError('')
-    search({ query, version, loader: curLoader, sort, offset, type }, ac.signal)
-      .then((r) => { setHits((h) => (append ? [...h, ...r.hits] : r.hits)); setTotal(r.total_hits) })
+    search({ query, version, loader: curLoader, sort, offset, type, category }, ac.signal)
+      .then((r) => { setHits(r.hits); setTotal(r.total_hits) })
       .catch((e) => e.name !== 'AbortError' && setError(e.message))
       .finally(() => !ac.signal.aborted && setBusy(false))
   }
   useEffect(() => { setHits([]); setTotal(0); if (version) setBusy(true) }, [type])
-  useEffect(() => { const t = setTimeout(() => runSearch(0, false), 350); return () => clearTimeout(t) }, [query, version, curLoader, sort, tick, type])
+  // New filters go back to page 1 (debounced while typing); changing the page fetches right away.
+  const fkey = [query, version, curLoader, sort, tick, type, category].join('|')
+  const lastKey = useRef(fkey)
+  useEffect(() => {
+    const changed = lastKey.current !== fkey
+    lastKey.current = fkey
+    if (changed && page !== 1) { setPage(1); return }
+    const t = setTimeout(() => runSearch((page - 1) * PAGE_SIZE), changed ? 350 : 0)
+    return () => clearTimeout(t)
+  }, [fkey, page])
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') setPanel(false)
+      else if (e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) { e.preventDefault(); searchRef.current?.focus() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  const pages = Math.min(Math.ceil(total / PAGE_SIZE), MAX_PAGES)
+  const goPage = (n) => { if (n < 1 || n > pages || n === page) return; setHits([]); setPage(n); window.scrollTo({ top: 0, behavior: 'smooth' }) }
 
   useEffect(() => {
     if (!version || !selected.length) { setPlan([]); return }
@@ -274,27 +303,29 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <div className="brand"><svg className="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 28 9.5v13L16 29 4 22.5v-13z" fill="var(--panel2)"/><path d="M16 3 28 9.5 16 16 4 9.5z" fill="var(--copper)"/><path d="M16 16v13L4 22.5v-13z" fill="var(--teal)" opacity=".85"/><path d="M16 16v13l12-6.5v-13z" fill="var(--teal)" opacity=".5"/></svg><span><b>DIV</b> Modpack Builder</span></div>
-        <button className="icon" aria-label="Toggle theme" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}</button>
+        <div className="brand" title="DIV Modpack Builder"><svg className="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 28 9.5 16 16 4 9.5z" fill="var(--copper)"/><path d="M16 16v13L4 22.5v-13z" fill="var(--teal)" opacity=".85"/><path d="M16 16v13l12-6.5v-13z" fill="var(--teal)" opacity=".5"/></svg><span><b>DIV</b></span></div>
+        <label className="search"><Search size={18} /><input ref={searchRef} placeholder={`Search ${T[type].label.toLowerCase()} for Minecraft ${version}`} aria-label="Search" value={query} onChange={(e) => { setQuery(e.target.value); if (view !== 'browse') setView('browse') }} /><kbd aria-hidden="true">/</kbd></label>
         <select value={version} onChange={(e) => setVersion(e.target.value)} aria-label="Minecraft version">{versions.map((v) => <option key={v}>{v}</option>)}</select>
         <div className="seg" role="group" aria-label={isPlugin ? 'Server platform' : 'Mod loader'}>{(isPlugin ? Object.keys(PLUGIN_LOADERS) : LOADERS).map((l) => <button key={l} className={curLoader === l ? 'active' : ''} aria-pressed={curLoader === l} onClick={() => (isPlugin ? setPloader(l) : setLoader(l))}>{isPlugin ? PLUGIN_NAMES[l] : LOADER_NAMES[l]}</button>)}</div>
-        <button className="ghost mobile" onClick={() => setPanel(!panel)}>Selection ({selected.length})</button>
+        <button className="icon" aria-label="Toggle theme" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}</button>
       </header>
+      <nav className="types" aria-label="Content types">
+        {TYPES.map((t) => <button key={t.id} className={'tile' + (view === 'browse' && type === t.id ? ' active' : '')} aria-pressed={view === 'browse' && type === t.id} onClick={() => { setType(t.id); setCategory(''); setView('browse') }}>{TYPE_ICONS[t.id]}<span>{t.label}</span></button>)}
+        <div className="sections" role="group" aria-label="My stuff">
+          {NAV.map(([id, label]) => <button key={id} className={view === id ? 'active' : ''} aria-pressed={view === id} onClick={() => setView(id)}>{label}{counts[id] ? <i className="badge">{counts[id]}</i> : null}</button>)}
+        </div>
+      </nav>
       <main>
-        <nav className="side" aria-label="Main">
-          {TYPES.map((t) => <button key={t.id} className={view === 'browse' && type === t.id ? 'active' : ''} onClick={() => { setType(t.id); setView('browse') }}>{TYPE_ICONS[t.id]} {t.label}</button>)}
-          <hr />
-          {NAV.map(([id, label, Icon]) => (
-            <button key={id} className={view === id ? 'active' : ''} onClick={() => (id === 'selection' ? setPanel(true) : setView(id))}><Icon size={16} /> {label}{counts[id] ? <i className="badge">{counts[id]}</i> : null}</button>
-          ))}
-        </nav>
         <section className="browse" hidden={view !== 'browse'}>
-          <h1 className="title">{T[type].label} for Minecraft {version} {T[type].loader && <span>{loaderLabel}</span>}</h1>
-          <p className="sub">{total ? `${total.toLocaleString()} ${T[type].label.toLowerCase()} match your filters.` : 'Pick a version, then add items to your selection.'}</p>
-          <div className="bar">
-            <label className="search"><Search size={16} /><input placeholder={`Search ${T[type].label.toLowerCase()}`} value={query} onChange={(e) => setQuery(e.target.value)} /></label>
+          <h1 className="sr">{T[type].label} for Minecraft {version}{T[type].loader ? ` on ${loaderLabel}` : ''}</h1>
+          <div className="filters">
+            <div className="cats" role="group" aria-label="Category">
+              {['', ...CATS[type]].map((c) => <button key={c || 'all'} className={'cat' + (category === c ? ' active' : '')} aria-pressed={category === c} onClick={() => setCategory(c)}>{c ? c.replace(/-/g, ' ') : 'All'}</button>)}
+            </div>
+            <span className="count" aria-live="polite">{total ? `${total.toLocaleString()} results` : ''}</span>
             <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort">{SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
           </div>
+          {isPlugin && <div className="note">Showing plugins that run on {PLUGIN_NAMES[ploader]}, including {PLUGIN_LOADERS[ploader].slice(1).join(' and ') || 'its own'} plugins. Downloads go in a <code>plugins/</code> folder.</div>}
           {error && <div className="err"><AlertTriangle size={16} /> {error} <button onClick={() => setTick((t) => t + 1)}>Retry</button></div>}
           {!busy && !error && !hits.length && <p className="empty">No {T[type].label.toLowerCase()} found for Minecraft {version}{T[type].loader ? ` on ${loaderLabel}` : ''}. Try another search{T[type].loader ? ', version or loader' : ' or version'}.</p>}
           <div className="grid">
@@ -315,17 +346,23 @@ export default function App() {
                       {h.display_categories?.slice(0, 3).map((c) => <span key={c} className="chip">{c}</span>)}
                     </div>
                     <div className="row">
-                      <button className={on ? 'on' : 'primary'} onClick={() => toggle(h)}>{on ? <><Check size={14} /> Added</> : <><Plus size={14} /> Add</>}</button>
                       <button onClick={() => setDetail({ id: h.project_id, title: h.title, type })}>Details</button>
-                      <button className={'icon' + (favs.some((f) => f.id === h.project_id) ? ' on' : '')} aria-label="Favorite" onClick={() => toggleFav({ id: h.project_id, title: h.title, icon: h.icon_url, slug: h.slug, type })}><Heart size={14} /></button>
+                      <button className={'icon' + (favs.some((f) => f.id === h.project_id) ? ' on' : '')} aria-label={`Favorite ${h.title}`} onClick={() => toggleFav({ id: h.project_id, title: h.title, icon: h.icon_url, slug: h.slug, type })}><Heart size={14} /></button>
                     </div>
                   </div>
+                  <button className={'addbtn' + (on ? ' on' : '')} aria-pressed={on} aria-label={`Add ${h.title} to pack`} onClick={() => toggle(h)}>{on ? <Check size={18} /> : <Plus size={20} />}</button>
                 </article>
               )
             })}
           </div>
           {busy && <p className="empty"><Loader2 className="spin" size={16} /> Loading…</p>}
-          {!busy && hits.length < total && <button className="more" onClick={() => runSearch(hits.length, true)}>Load more ({total - hits.length} left)</button>}
+          {pages > 1 && (
+            <nav className="pager" aria-label="Pagination">
+              <button aria-label="Previous page" disabled={page === 1 || busy} onClick={() => goPage(page - 1)}><ChevronLeft size={18} /></button>
+              {pageList(page, pages).map((n, i) => n === '…' ? <span key={'e' + i} className="gap" aria-hidden="true">…</span> : <button key={n} className={n === page ? 'active' : ''} aria-label={`Page ${n}`} aria-current={n === page ? 'page' : undefined} disabled={busy} onClick={() => goPage(n)}>{n}</button>)}
+              <button aria-label="Next page" disabled={page === pages || busy} onClick={() => goPage(page + 1)}><ChevronRight size={18} /></button>
+            </nav>
+          )}
         </section>
         {view === 'favorites' && (
           <section className="browse">
@@ -335,14 +372,14 @@ export default function App() {
               {favs.map((f) => {
                 const on = selected.some((x) => x.id === f.id)
                 return (
-                  <article key={f.id} className="card">
+                  <article key={f.id} className={'card' + (on ? ' picked' : '')}>
                     {f.icon ? <img src={f.icon} alt="" width="56" height="56" loading="lazy" /> : <div className="ph" aria-hidden="true"><Package size={22} /></div>}
                     <div className="body"><h3>{f.title}</h3>
                       <div className="row">
-                        <button className={on ? 'on' : 'primary'} onClick={() => addRemove(f.id, f.title, f.type)}>{on ? 'Added' : 'Add'}</button>
                         <button onClick={() => setDetail({ id: f.id, title: f.title, type: f.type })}>Details</button>
-                        <button className="icon" aria-label="Remove favorite" onClick={() => toggleFav(f)}><Trash2 size={14} /></button>
+                        <button className="icon" aria-label={`Remove ${f.title} from favorites`} onClick={() => toggleFav(f)}><Trash2 size={14} /></button>
                       </div></div>
+                    <button className={'addbtn' + (on ? ' on' : '')} aria-pressed={on} aria-label={`Add ${f.title} to pack`} onClick={() => addRemove(f.id, f.title, f.type)}>{on ? <Check size={18} /> : <Plus size={20} />}</button>
                   </article>
                 )
               })}
@@ -392,9 +429,8 @@ export default function App() {
             <p>Dependency resolution and the known-conflict warnings reduce problems but cannot guarantee a crash-free pack.</p>
           </section>
         )}
-        <aside className={panel ? 'open' : ''}>
-          <button className="ghost mobile" onClick={() => setPanel(false)}>Close</button>
-          <div className="ahead"><h2>My selection</h2><span className="badge big">{selected.length}</span></div>
+        <aside id="pack-panel" aria-label="My pack" className={'pack' + (panel ? ' open' : '')}>
+          <div className="ahead"><h2>My pack</h2><span className="badge big">{selected.length}</span><button className="icon" aria-label="Close pack" onClick={() => setPanel(false)}>✕</button></div>
           <button className="ghost wide" disabled={perfBusy} onClick={addPerf}>{perfBusy ? 'Adding…' : 'Add performance mods'}</button>
           {planBusy && <p><Loader2 className="spin" size={14} /> Resolving dependencies…</p>}
           {TYPES.map((t) => {
@@ -441,7 +477,6 @@ export default function App() {
             <button className="wide" onClick={() => cancel.current?.abort()}>Cancel download</button>
           ) : (
             <>
-              <button className="primary wide" disabled={!canExport} onClick={() => exportZip()}><Download size={16} /> Download ZIP</button>
               <button className="wide" disabled={!canExport || !LOADER_META[loader]} onClick={exportMrpack}>Export .mrpack</button>
               {!LOADER_META[loader] && <small>.mrpack export supports Fabric and Quilt for now.</small>}
             </>
@@ -451,6 +486,23 @@ export default function App() {
           {note && <p className="small" role="status">{note}</p>}
         </aside>
       </main>
+      {(selected.length > 0 || dl) && (
+        <div className="dock" role="region" aria-label="Your pack">
+          <div className="stack" aria-hidden="true">
+            {plan.slice(0, 5).map((p) => p.icon ? <img key={p.id} src={p.icon} alt="" width="36" height="36" /> : <span key={p.id} className="ph" />)}
+            {plan.length > 5 && <span className="more">+{plan.length - 5}</span>}
+          </div>
+          <div className="dtxt">
+            <b>{ready.length} files · {(ready.reduce((n, p) => n + (p.file.size || 0), 0) / 1048576).toFixed(1)} MB</b>
+            <small className={broken.length ? 'bad' : ''}>{dl?.running ? `${dl.stage || dl.current} (${dl.done}/${dl.total})` : broken.length ? `${broken.length} incompatible` : planBusy ? 'Resolving dependencies…' : ready.length ? 'Dependencies resolved' : 'Checking…'}</small>
+          </div>
+          <button className="ghost" aria-expanded={panel} aria-controls="pack-panel" onClick={() => setPanel(!panel)}>{panel ? 'Hide pack' : 'View pack'}</button>
+          {dl?.running
+            ? <button onClick={() => cancel.current?.abort()}>Cancel</button>
+            : <button className="primary" disabled={!canExport} onClick={() => exportZip()}><Download size={16} /> Download ZIP</button>}
+          {dl?.running && <progress className="dprog" value={dl.done} max={dl.total || 1} aria-label="Download progress" />}
+        </div>
+      )}
       {detail && <Details item={detail} version={version} loader={typeOf(detail.type) === 'plugin' ? ploader : loader} onClose={() => setDetail(null)} onBase={baseOnModpack} />}
     </div>
   )
