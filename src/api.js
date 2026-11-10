@@ -30,7 +30,7 @@ export async function resolve(roots, gv, loaders) {
   const pick = (t) => (t === 'plugin' ? loaders.ploader : loaders.loader)
   async function visit(id, by, hint) {
     if (out.has(id)) { if (by) out.get(id).requiredBy.add(by); return }
-    const e = { id, title: id, type: 'mod', requiredBy: new Set(by ? [by] : []), root: false, optIds: [] }
+    const e = { id, title: id, type: 'mod', requiredBy: new Set(by ? [by] : []), root: false, optIds: [], incompat: [] }
     out.set(id, e)
     const p = await j(`/project/${id}`)
     e.title = p.title; e.slug = p.slug; e.icon = p.icon_url; e.type = typeOf(p.project_type)
@@ -45,6 +45,7 @@ export async function resolve(roots, gv, loaders) {
     e.file = v.files.find((f) => f.primary) || v.files[0]
     for (const d of v.dependencies || []) {
       if (d.dependency_type === 'optional' && d.project_id) e.optIds.push(d.project_id)
+      if (d.dependency_type === 'incompatible' && d.project_id) e.incompat.push(d.project_id)
       if (d.dependency_type !== 'required') continue
       let pid = d.project_id
       if (!pid && d.version_id) pid = (await j(`/version/${d.version_id}`)).project_id

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import JSZip from 'jszip'
-import { Search, Package, Download, Trash2, Plus, Check, AlertTriangle, ExternalLink, Loader2, Heart, Settings, Info, Sun, Moon, Bookmark, Box, Boxes, Paintbrush, Braces, Glasses, Plug, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Search, Package, Download, Trash2, Plus, Check, AlertTriangle, ExternalLink, Loader2, Heart, Settings, Info, Sun, Moon, Bookmark, Box, Boxes, Paintbrush, Braces, Glasses, Plug, ChevronLeft, ChevronRight, Upload } from 'lucide-react'
 import Details from './Details.jsx'
 import { gameVersions, search, resolve, mrpackToMods, j, versionsPath } from './api.js'
 import { TYPES, T, typeOf, PLUGIN_LOADERS, PLUGIN_NAMES, CATS } from './types.js'
@@ -23,6 +23,10 @@ const CONFLICTS = [['starlight', 'scalablelux'], ['starlight', 'phosphor'], ['sc
 const PERF = { fabric: ['sodium', 'lithium', 'ferrite-core', 'modernfix', 'entityculling', 'immediatelyfast'], forge: ['embeddium', 'modernfix', 'ferrite-core', 'entityculling', 'immediatelyfast'] }
 PERF.quilt = PERF.fabric; PERF.neoforge = PERF.forge
 const PAGE_SIZE = 20, MAX_PAGES = 100
+// .mrpack files may only point at these hosts; the spec forbids anything else.
+const DL_HOSTS = ['cdn.modrinth.com', 'github.com', 'raw.githubusercontent.com', 'gitlab.com']
+// Reject absolute paths and ".." so a hostile pack cannot write outside the archive.
+const okPath = (p) => typeof p === 'string' && !!p && !p.startsWith('/') && !/^[A-Za-z]:/.test(p) && !p.split(/[\\/]/).includes('..')
 // 1 … 4 5 [6] 7 8 … 40
 const pageList = (p, n) => {
   const s = new Set([1, n, p - 1, p, p + 1, p === 1 ? 3 : 0, p === n ? n - 2 : 0])
@@ -30,7 +34,7 @@ const pageList = (p, n) => {
   return nums.flatMap((x, i) => (i && x - nums[i - 1] > 1 ? (x - nums[i - 1] === 2 ? [x - 1, x] : ['…', x]) : [x]))
 }
 const TYPE_ICONS = { mod: <Box size={16} />, resourcepack: <Paintbrush size={16} />, datapack: <Braces size={16} />, shader: <Glasses size={16} />, modpack: <Boxes size={16} />, plugin: <Plug size={16} /> }
-const NAV = [['packs', 'Saved modpacks', Bookmark], ['favorites', 'Favorites', Heart], ['settings', 'Settings', Settings], ['about', 'About', Info]]
+const NAV = [['convert', 'Convert .mrpack', Upload], ['packs', 'Saved modpacks', Bookmark], ['favorites', 'Favorites', Heart], ['settings', 'Settings', Settings], ['about', 'About', Info]]
 const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('')
 function save(blob, name) {
   const url = URL.createObjectURL(blob)
@@ -52,6 +56,10 @@ export default function App() {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [category, setCategory] = useState('')
+  const [conv, setConv] = useState(null)
+  const [convSide, setConvSide] = useState('client')
+  const [over, setOver] = useState(false)
+  const convAbort = useRef(null)
   const searchRef = useRef(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -72,6 +80,7 @@ export default function App() {
   const [perfBusy, setPerfBusy] = useState(false)
   const abort = useRef(null)
   const cancel = useRef(null)
+  const lastZip = useRef(null) // the archive from the last ZIP export, so "Retry failed" can add to it
 
   useEffect(() => {
     gameVersions().then((v) => { setVersions(v); setVersion((c) => c || v[0]) }).catch((e) => setError(e.message))
@@ -191,6 +200,65 @@ export default function App() {
       }
     } catch (err) { setNote('Import failed: ' + err.message) }
   }
+  // .mrpack -> ZIP: download every listed file, verify its hash, then merge the overrides folders on top.
+  async function convertMrpack(file) {
+    if (!file) return
+    if (!/\.mrpack$/i.test(file.name)) { setConv({ error: 'That is not a .mrpack file.' }); return }
+    const ac = (convAbort.current = new AbortController())
+    const side = convSide
+    setConv({ running: true, name: file.name, stage: 'Reading pack…', done: 0, total: 0, failed: [] })
+    try {
+      const z = await JSZip.loadAsync(file)
+      const entry = z.file('modrinth.index.json')
+      if (!entry) throw new Error('modrinth.index.json is missing. Is this really a .mrpack?')
+      const index = JSON.parse(await entry.async('string'))
+      const all = index.files || []
+      const list = all.filter((f) => okPath(f.path) && f.env?.[side] !== 'unsupported')
+      setConv((c) => ({ ...c, total: list.length, stage: 'Downloading files…' }))
+      const out = new JSZip(), failed = []
+      let done = 0, next = 0
+      const worker = async () => {
+        while (next < list.length && !ac.signal.aborted) {
+          const f = list[next++]
+          setConv((c) => ({ ...c, current: f.path.split('/').pop() }))
+          try {
+            let buf = null
+            for (const u of f.downloads || []) {
+              try {
+                if (!DL_HOSTS.includes(new URL(u).hostname)) continue
+                const r = await fetch(u, { signal: ac.signal })
+                if (!r.ok) continue
+                const b = await r.arrayBuffer()
+                const want = f.hashes?.sha512
+                if (want && hex(await crypto.subtle.digest('SHA-512', b)) !== want) continue
+                buf = b; break
+              } catch (e) { if (ac.signal.aborted) throw e }
+            }
+            if (!buf) throw new Error('no valid download')
+            out.file(f.path, buf)
+          } catch (e) { if (ac.signal.aborted) return; failed.push(f.path) }
+          done++; setConv((c) => ({ ...c, done }))
+        }
+      }
+      await Promise.all(Array.from({ length: 4 }, worker))
+      if (ac.signal.aborted) { setConv({ cancelled: true, name: file.name }); return }
+      setConv((c) => ({ ...c, stage: 'Adding config files…' }))
+      let extra = 0
+      for (const pre of ['overrides/', side === 'server' ? 'server-overrides/' : 'client-overrides/']) {
+        for (const [p, e] of Object.entries(z.files)) {
+          if (e.dir || !p.startsWith(pre)) continue
+          const rel = p.slice(pre.length)
+          if (!okPath(rel)) continue
+          out.file(rel, await e.async('arraybuffer')); extra++
+        }
+      }
+      setConv((c) => ({ ...c, stage: 'Building ZIP…' }))
+      save(await out.generateAsync({ type: 'blob' }), safe(`${index.name || 'modpack'}-${index.versionId || 'pack'}`) + '.zip')
+      setConv({ done: list.length - failed.length, total: list.length, failed, extra, skipped: all.length - list.length, name: file.name, pack: index.name, mc: index.dependencies?.minecraft })
+    } catch (err) {
+      setConv(ac.signal.aborted ? { cancelled: true, name: file.name } : { error: err.message })
+    }
+  }
   async function baseOnModpack(file) {
     setDetail(null); setNote('Reading modpack…')
     try {
@@ -203,7 +271,19 @@ export default function App() {
 
   const counts = { selection: selected.length, packs: packs.length, favorites: favs.length }
   const slugSet = new Set(plan.map((p) => p.slug).filter(Boolean))
-  const conflicts = CONFLICTS.filter(([a, b]) => slugSet.has(a) && slugSet.has(b)).map(([a, b]) => `${plan.find((p) => p.slug === a).title} and ${plan.find((p) => p.slug === b).title}`)
+  // Conflicts the mod authors declare on Modrinth, plus a short list of commonly reported pairs as a fallback.
+  const conflicts = (() => {
+    const found = new Map()
+    for (const p of plan) for (const id of p.incompat || []) {
+      const o = plan.find((x) => x.id === id)
+      if (o) found.set([p.id, o.id].sort().join('|'), { text: `${p.title} and ${o.title}`, declared: true })
+    }
+    for (const [x, y] of CONFLICTS) {
+      const p = plan.find((m) => m.slug === x), o = plan.find((m) => m.slug === y)
+      if (p && o && !found.has([p.id, o.id].sort().join('|'))) found.set([p.id, o.id].sort().join('|'), { text: `${p.title} and ${o.title}`, declared: false })
+    }
+    return [...found.values()]
+  })()
   async function addPerf() {
     setPerfBusy(true); setNote('')
     try {
@@ -251,12 +331,16 @@ export default function App() {
 
   async function exportZip(only) {
     const ac = (cancel.current = new AbortController())
-    const zip = new JSZip(), files = [], failed = []
+    // A retry adds to the archive from the previous run; a normal export starts a fresh one.
+    const snap = only && lastZip.current ? lastZip.current : { zip: new JSZip(), files: [], version, loader, ploader }
+    const { zip, files } = snap
+    const failed = []
     const list = only || ready
-    setDl({ running: true, done: 0, total: list.length, current: '', failed: [] })
+    const before = files.length
+    setDl({ running: true, done: before, total: before + list.length, current: '', failed: [] })
     for (const [i, p] of list.entries()) {
       if (ac.signal.aborted) break
-      setDl((d) => ({ ...d, current: p.file.filename, done: i }))
+      setDl((d) => ({ ...d, current: p.file.filename, done: before + i }))
       try {
         const r = await fetch(p.file.url, { signal: ac.signal })
         if (!r.ok) throw new Error('HTTP ' + r.status)
@@ -269,12 +353,13 @@ export default function App() {
         files.push({ project: p.title, projectId: p.id, type: typeOf(p.type), versionId: p.version.id, url: `https://modrinth.com/${typeOf(p.type)}/${p.slug}`, file: dir + '/' + name, verified: !!want, reason: p.root ? 'selected' : 'required by ' + [...p.requiredBy].join(', ') })
       } catch (err) { if (ac.signal.aborted) break; failed.push(p) }
     }
-    if (ac.signal.aborted) { setDl({ running: false, cancelled: true, done: files.length, total: list.length, failed: [] }); return }
+    if (ac.signal.aborted) { setDl({ running: false, cancelled: true, done: files.length, total: before + list.length, failed: only || [] }); return }
     setDl((d) => ({ ...d, stage: 'Building ZIP…' }))
-    zip.file('manifest.json', JSON.stringify({ app: 'DIV Modpack Builder', exported: new Date().toISOString(), minecraft: version, loader, ...(files.some((f) => f.type === 'plugin') ? { pluginPlatform: ploader } : {}), mods: files, failed: failed.map((p) => p.title) }, null, 2))
-    zip.file('README.txt', `DIV Modpack Builder\nMinecraft ${version} / ${loader}\n\nThis archive contains downloaded files only. It is not a complete Minecraft instance.\nInstall Minecraft (and the ${loader} loader for mods), then copy each folder:\n\nmods/          -> your profile's mods folder\nresourcepacks/ -> your profile's resourcepacks folder\nshaderpacks/   -> your profile's shaderpacks folder (needs Iris or OptiFine)\ndatapacks/     -> a world's datapacks folder (saves/<world>/datapacks)\nplugins/       -> your Paper/Spigot-compatible server's plugins folder\nmodpacks/      -> import these .mrpack files in a launcher that supports Modrinth packs. Install each modpack on its own, not on top of other mods.\n\nRequired dependencies were resolved from Modrinth metadata; this does not guarantee a crash-free pack.\n`)
-    save(await zip.generateAsync({ type: 'blob' }), `div-modpack-${version}-${loader}.zip`)
-    setDl({ running: false, done: files.length, total: list.length, failed })
+    zip.file('manifest.json', JSON.stringify({ app: 'DIV Modpack Builder', exported: new Date().toISOString(), minecraft: snap.version, loader: snap.loader, ...(files.some((f) => f.type === 'plugin') ? { pluginPlatform: snap.ploader } : {}), mods: files, failed: failed.map((p) => p.title) }, null, 2))
+    zip.file('README.txt', `DIV Modpack Builder\nMinecraft ${snap.version} / ${snap.loader}\n\nThis archive contains downloaded files only. It is not a complete Minecraft instance.\nInstall Minecraft (and the ${snap.loader} loader for mods), then copy each folder:\n\nmods/          -> your profile's mods folder\nresourcepacks/ -> your profile's resourcepacks folder\nshaderpacks/   -> your profile's shaderpacks folder (needs Iris or OptiFine)\ndatapacks/     -> a world's datapacks folder (saves/<world>/datapacks)\nplugins/       -> your Paper/Spigot-compatible server's plugins folder\nmodpacks/      -> import these .mrpack files in a launcher that supports Modrinth packs. Install each modpack on its own, not on top of other mods.\n\nRequired dependencies were resolved from Modrinth metadata; this does not guarantee a crash-free pack.\n`)
+    save(await zip.generateAsync({ type: 'blob' }), `div-modpack-${snap.version}-${snap.loader}.zip`)
+    lastZip.current = snap
+    setDl({ running: false, done: files.length, total: files.length + failed.length, failed, retried: !!only })
   }
 
   async function exportMrpack() {
@@ -420,6 +505,39 @@ export default function App() {
             <button className="ghost" onClick={resetAll}>Reset all local data</button>
           </section>
         )}
+        {view === 'convert' && (
+          <section className="browse convert">
+            <h2>Convert .mrpack to ZIP</h2>
+            <p className="sub">Choose a Modrinth modpack (.mrpack) and it converts right away. Every file is downloaded and hash-checked, then you get one ZIP with the mods and config files in place.</p>
+            <div className="seg" role="group" aria-label="Pack type">
+              {[['client', 'Client pack'], ['server', 'Server pack']].map(([v, l]) => <button key={v} className={convSide === v ? 'active' : ''} aria-pressed={convSide === v} disabled={conv?.running} onClick={() => setConvSide(v)}>{l}</button>)}
+            </div>
+            <label className={'drop' + (over ? ' over' : '')} onDragOver={(e) => { e.preventDefault(); setOver(true) }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); if (!conv?.running) convertMrpack(e.dataTransfer.files[0]) }}>
+              <Upload size={28} aria-hidden="true" />
+              <b>Drop your .mrpack here</b>
+              <span>or click to choose a file</span>
+              <input type="file" accept=".mrpack" disabled={conv?.running} onChange={(e) => { const f = e.target.files[0]; e.target.value = ''; convertMrpack(f) }} />
+            </label>
+            {conv?.running && (
+              <div className="status" role="status">
+                <div>{conv.stage}{conv.total ? ` (${conv.done}/${conv.total})` : ''}</div>
+                {conv.current && <small>{conv.current}</small>}
+                <progress value={conv.done} max={conv.total || 1} aria-label="Conversion progress" />
+                <button onClick={() => convAbort.current?.abort()}>Cancel</button>
+              </div>
+            )}
+            {conv?.error && <div className="err" role="alert">{conv.error}</div>}
+            {conv?.cancelled && <div className="status">Conversion cancelled.</div>}
+            {conv && !conv.running && !conv.error && !conv.cancelled && (
+              <div className={'status' + (conv.failed.length ? ' warn' : ' ok')} role="status">
+                <b>Done: {conv.pack || conv.name}{conv.mc ? ` (Minecraft ${conv.mc})` : ''}</b>
+                <div>{conv.done} of {conv.total} files downloaded, plus {conv.extra} config file(s). The ZIP was saved to your downloads.</div>
+                {conv.skipped > 0 && <small>{conv.skipped} file(s) were left out (not for a {convSide} pack, or an unsafe path).</small>}
+                {conv.failed.length > 0 && <div>Could not download {conv.failed.length}: {conv.failed.map((p) => p.split('/').pop()).join(', ')}</div>}
+              </div>
+            )}
+          </section>
+        )}
         {view === 'about' && (
           <section className="browse">
             <h2>About DIV Modpack Builder</h2>
@@ -461,16 +579,17 @@ export default function App() {
             </div>
           )}
           <div className={'status ' + (broken.length ? 'bad' : ready.length ? 'ok' : '')}>
-            {broken.length ? `Incompatible: ${broken.length} mod(s) have no release for ${version} on ${loader}. Remove them or change version/loader.` : ready.length ? 'All required dependencies resolved from Modrinth. Mod-to-mod conflicts are not checked.' : 'Nothing to check yet.'}
+            {broken.length ? `Incompatible: ${broken.length} mod(s) have no release for ${version} on ${loader}. Remove them or change version/loader.` : ready.length ? 'All required dependencies resolved from Modrinth. Conflicts are checked against the incompatibilities mod authors declare.' : 'Nothing to check yet.'}
           </div>
           {plan.some((p) => p.type === 'modpack') && plan.length > 1 && <div className="status warn">A modpack installs as its own instance. Mixing it with other items usually breaks it, so download the modpack on its own.</div>}
-          {conflicts.map((c) => <div key={c} className="status warn">{c}: commonly reported as incompatible. Remove one unless you have verified they work together.</div>)}
+          {conflicts.map((c) => <div key={c.text} className="status warn">{c.text}: {c.declared ? 'their authors list them as incompatible on Modrinth.' : 'commonly reported as incompatible.'} Remove one unless you have verified they work together.</div>)}
           <p className="small">{ready.length} files · {(ready.reduce((n, p) => n + (p.file.size || 0), 0) / 1048576).toFixed(1)} MB</p>
           {dl && (
             <div className="dl">
               <progress value={dl.done} max={dl.total || 1} />
               <small>{dl.running ? `${dl.stage || dl.current} (${dl.done}/${dl.total})` : dl.note || `${dl.cancelled ? 'Cancelled. ' : ''}${dl.done}/${dl.total} downloaded`}</small>
-              {!!dl.failed?.length && <div className="err">Failed: {dl.failed.map((f) => f.title).join(', ')} <button onClick={() => exportZip(dl.failed)}>Retry failed</button></div>}
+              {!!dl.failed?.length && <div className="err">Failed: {dl.failed.map((f) => f.title).join(', ')} <button onClick={() => exportZip(dl.failed)}>Retry failed</button><small> Retrying adds them to the same ZIP and saves it again with everything in it.</small></div>}
+              {dl.retried && !dl.failed?.length && !dl.running && <small>Retry worked. The ZIP you just saved has every file.</small>}
             </div>
           )}
           {dl?.running ? (
