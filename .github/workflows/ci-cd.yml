@@ -45,7 +45,9 @@ jobs:
       - name: Install wine for Windows build
         run: |
           sudo apt-get update
-          sudo apt-get install -y wine64 wine32
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y wine64 wine32:i386
 
       - name: Install dependencies
         run: npm ci
