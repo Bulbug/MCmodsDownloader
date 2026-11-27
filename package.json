@@ -49,9 +49,7 @@
       "target": [
         "AppImage",
         "deb"
-      ],
-      "desktopName": "DIV Modpack Builder",
-      "syncDesktopName": true
+      ]
     },
     "win": {
       "target": [
