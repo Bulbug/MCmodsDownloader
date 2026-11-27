@@ -5,9 +5,9 @@ const fs = require('node:fs')
 let mainWindow = null
 const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json')
 const PACKS_PATH = path.join(app.getPath('userData'), 'packs.json')
-const FAV_PATH = path.join(app.getPath('userPath', 'favs.json'))
-const THEME_PATH = path.join(app.getPath('userPath', 'theme.json'))
-const VERSION_PATH = path.join(app.getPath('userPath', 'version.json'))
+const FAV_PATH = path.join(app.getPath('userData'), 'favs.json')
+const THEME_PATH = path.join(app.getPath('userData'), 'theme.json')
+const VERSION_PATH = path.join(app.getPath('userData'), 'version.json')
 
 function readConfig() {
   try {
@@ -93,13 +93,16 @@ function showMessageBox(message, options) {
 }
 
 function createWindow() {
+  const iconPath = path.join(__dirname, '../src/assets/icon.png')
+  const icon = fs.existsSync(iconPath) ? iconPath : undefined
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 900,
     minHeight: 600,
     title: 'DIV Modpack Builder',
-    icon: path.join(__dirname, '../src/assets/icon.png'),
+    ...(icon && { icon }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -141,11 +144,20 @@ ipcMain.handle('fs:readFile', (event, path) => {
   }
 })
 
-ipcMain.handle('fs:writeFile', (event, path, content) => {
+ipcMain.handle('fs:writeFile', (event, filePath, content) => {
   try {
-    const dir = path.dirname(path)
+    const dir = path.dirname(filePath)
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(path, content)
+
+    // Handle Buffer or ArrayBuffer from the renderer
+    if (content instanceof ArrayBuffer) {
+      fs.writeFileSync(filePath, Buffer.from(content))
+    } else if (Buffer.isBuffer(content)) {
+      fs.writeFileSync(filePath, content)
+    } else {
+      fs.writeFileSync(filePath, content, 'utf8')
+    }
+
     return true
   } catch (err) {
     return { error: err.message }
@@ -195,3 +207,15 @@ ipcMain.handle('dialog:showOpenDialog', (event, options) => {
 ipcMain.handle('dialog:showMessageBox', (event, options) => {
   return dialog.showMessageBoxSync(options)
 })
+
+// Config IPC handlers
+ipcMain.handle('config:read', () => readConfig())
+ipcMain.handle('config:write', (event, data) => writeConfig(data))
+
+// Packs IPC handlers
+ipcMain.handle('packs:read', () => readPacks())
+ipcMain.handle('packs:write', (event, data) => writePacks(data))
+
+// Favs IPC handlers
+ipcMain.handle('favs:read', () => readFavs())
+ipcMain.handle('favs:write', (event, data) => writeFavs(data))
