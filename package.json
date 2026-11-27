@@ -40,8 +40,14 @@
     "files": ["dist/**/*", "electron/**/*"],
     "linux": {
       "category": "Game",
-      "target": ["AppImage", "deb"]
-    }
+      "target": ["AppImage", "deb"],
+      "desktopName": "DIV Modpack Builder",
+      "syncDesktopName": true
+    },
+    "win": {
+      "target": ["nsis", "portable"]
+    },
+    "icon": "src/assets/icon.svg"
   },
   "standard-version": {
     "types": [
