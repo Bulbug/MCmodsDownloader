@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import JSZip from 'jszip'
-import { Search, Package, Download, Trash2, Plus, Check, AlertTriangle, ExternalLink, Loader2, Heart, Settings, Info, Sun, Moon, Bookmark, Box, Boxes, Paintbrush, Braces, Glasses, Plug, ChevronLeft, ChevronRight, Upload } from 'lucide-react'
+import { Search, Package, Download, Trash2, Plus, Check, AlertTriangle, ExternalLink, Loader2, Heart, Settings, Info, Sun, Moon, Bookmark, Box, Boxes, Paintbrush, Braces, Glasses, Plug, ChevronLeft, ChevronRight, Upload, Folder } from 'lucide-react'
 import Details from './Details.jsx'
 import { gameVersions, search, resolve, mrpackToMods, j, versionsPath } from './api.js'
 import { TYPES, T, typeOf, PLUGIN_LOADERS, PLUGIN_NAMES, CATS } from './types.js'
@@ -8,26 +8,14 @@ import { TYPES, T, typeOf, PLUGIN_LOADERS, PLUGIN_NAMES, CATS } from './types.js
 const LOADERS = ['fabric', 'forge', 'neoforge', 'quilt']
 const LOADER_NAMES = { fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt' }
 const SORTS = [['relevance', 'Relevance'], ['downloads', 'Downloads'], ['follows', 'Follows'], ['updated', 'Recently updated']]
-const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d } catch { return d } }
+const PAGE_SIZE = 20, MAX_PAGES = 100
 const LOADER_META = { fabric: ['https://meta.fabricmc.net/v2/versions/loader', 'fabric-loader'], quilt: ['https://meta.quiltmc.org/v3/versions/loader', 'quilt-loader'] }
-const arr = (k) => { const v = load(k, []); return Array.isArray(v) ? v : [] }
-const toB64 = (o) => btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-const fromB64 = (s) => JSON.parse(decodeURIComponent(escape(atob(s.replace(/-/g, '+').replace(/_/g, '/')))))
-function validPack(d) {
-  if (!d || typeof d.v !== 'string' || !LOADERS.includes(d.l) || !Array.isArray(d.m)) throw new Error('Not a valid pack')
-  const m = d.m.filter((x) => x && /^[A-Za-z0-9]{6,12}$/.test(x.id)).slice(0, 100).map((x) => ({ id: x.id, title: String(x.title || x.id).slice(0, 80), type: typeOf(x.type) }))
-  if (!m.length) throw new Error('The pack contains no mods')
-  return { v: d.v.slice(0, 20), l: d.l, p: PLUGIN_LOADERS[d.p] ? d.p : undefined, m }
-}
 const CONFLICTS = [['starlight', 'scalablelux'], ['starlight', 'phosphor'], ['scalablelux', 'phosphor'], ['lithium', 'canary'], ['sodium', 'embeddium'], ['sodium', 'rubidium'], ['embeddium', 'rubidium'], ['iris', 'oculus']]
 const PERF = { fabric: ['sodium', 'lithium', 'ferrite-core', 'modernfix', 'entityculling', 'immediatelyfast'], forge: ['embeddium', 'modernfix', 'ferrite-core', 'entityculling', 'immediatelyfast'] }
 PERF.quilt = PERF.fabric; PERF.neoforge = PERF.forge
-const PAGE_SIZE = 20, MAX_PAGES = 100
-// .mrpack files may only point at these hosts; the spec forbids anything else.
 const DL_HOSTS = ['cdn.modrinth.com', 'github.com', 'raw.githubusercontent.com', 'gitlab.com']
-// Reject absolute paths and ".." so a hostile pack cannot write outside the archive.
+
 const okPath = (p) => typeof p === 'string' && !!p && !p.startsWith('/') && !/^[A-Za-z]:/.test(p) && !p.split(/[\\/]/).includes('..')
-// 1 … 4 5 [6] 7 8 … 40
 const pageList = (p, n) => {
   const s = new Set([1, n, p - 1, p, p + 1, p === 1 ? 3 : 0, p === n ? n - 2 : 0])
   const nums = [...s].filter((x) => x >= 1 && x <= n).sort((x, y) => x - y)
@@ -36,20 +24,24 @@ const pageList = (p, n) => {
 const TYPE_ICONS = { mod: <Box size={16} />, resourcepack: <Paintbrush size={16} />, datapack: <Braces size={16} />, shader: <Glasses size={16} />, modpack: <Boxes size={16} />, plugin: <Plug size={16} /> }
 const NAV = [['convert', 'Convert .mrpack', Upload], ['packs', 'Saved modpacks', Bookmark], ['favorites', 'Favorites', Heart], ['settings', 'Settings', Settings], ['about', 'About', Info]]
 const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('')
-function save(blob, name) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a'); a.href = url; a.download = name; a.click()
-  setTimeout(() => URL.revokeObjectURL(url), 10000)
-}
 const safe = (n) => n.replace(/[^A-Za-z0-9._+-]/g, '_').slice(0, 120)
 const fmt = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : n)
+const toB64 = (o) => btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+const fromB64 = (s) => JSON.parse(decodeURIComponent(escape(atob(s.replace(/-/g, '+').replace(/_/g, '/')))))
+
+function validPack(d) {
+  if (!d || typeof d.v !== 'string' || !LOADERS.includes(d.l) || !Array.isArray(d.m)) throw new Error('Not a valid pack')
+  const m = d.m.filter((x) => x && /^[A-Za-z0-9]{6,12}$/.test(x.id)).slice(0, 100).map((x) => ({ id: x.id, title: String(x.title || x.id).slice(0, 80), type: typeOf(x.type) }))
+  if (!m.length) throw new Error('The pack contains no mods')
+  return { v: d.v.slice(0, 20), l: d.l, p: PLUGIN_LOADERS[d.p] ? d.p : undefined, m }
+}
 
 export default function App() {
   const [versions, setVersions] = useState([])
-  const [version, setVersion] = useState(() => load('div.version', ''))
-  const [loader, setLoader] = useState(() => load('div.loader', 'fabric'))
-  const [ploader, setPloader] = useState(() => { const p = load('div.ploader', 'paper'); return PLUGIN_LOADERS[p] ? p : 'paper' })
-  const [type, setType] = useState(() => { const t = load('div.type', 'mod'); return T[t] ? t : 'mod' })
+  const [version, setVersion] = useState('')
+  const [loader, setLoader] = useState('fabric')
+  const [ploader, setPloader] = useState('paper')
+  const [type, setType] = useState('mod')
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState('downloads')
   const [hits, setHits] = useState([])
@@ -59,37 +51,65 @@ export default function App() {
   const [conv, setConv] = useState(null)
   const [convSide, setConvSide] = useState('client')
   const [over, setOver] = useState(false)
-  const convAbort = useRef(null)
-  const searchRef = useRef(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [tick, setTick] = useState(0)
-  const [selected, setSelected] = useState(() => load('div.selected', []))
+  const [selected, setSelected] = useState([])
   const [plan, setPlan] = useState([])
   const [planBusy, setPlanBusy] = useState(false)
   const [dl, setDl] = useState(null)
   const [panel, setPanel] = useState(false)
   const [view, setView] = useState('browse')
-  const [favs, setFavs] = useState(() => arr('div.favs').filter((f) => f && f.id && f.title))
-  const [packs, setPacks] = useState(() => arr('div.packs').filter((p) => p && p.id && p.name && Array.isArray(p.mods)))
+  const [favs, setFavs] = useState([])
+  const [packs, setPacks] = useState([])
   const [detail, setDetail] = useState(null)
   const [packName, setPackName] = useState('')
   const [note, setNote] = useState('')
   const [updates, setUpdates] = useState({})
   const [pending, setPending] = useState({})
   const [perfBusy, setPerfBusy] = useState(false)
+  const [theme, setTheme] = useState('dark')
+  const [launcherFolder, setLauncherFolder] = useState('')
+
   const abort = useRef(null)
   const cancel = useRef(null)
-  const lastZip = useRef(null) // the archive from the last ZIP export, so "Retry failed" can add to it
+  const lastZip = useRef(null)
+  const searchRef = useRef(null)
+  const convAbort = useRef(null)
 
   useEffect(() => {
+    async function init() {
+      if (window.app) {
+        const config = await window.app.read()
+        setVersion(config.version || '')
+        setLoader(config.loader || 'fabric')
+        setPloader(config.ploader || 'paper')
+        setType(config.type || 'mod')
+        setTheme(config.theme || 'dark')
+        setLauncherFolder(config.launcherFolder || '')
+
+        const savedPacks = await window.app.readPacks()
+        setPacks(Array.isArray(savedPacks) ? savedPacks : [])
+
+        const savedFavs = await window.app.readFavs()
+        setFavs(Array.isArray(savedFavs) ? savedFavs : [])
+      }
+    }
+    init()
     gameVersions().then((v) => { setVersions(v); setVersion((c) => c || v[0]) }).catch((e) => setError(e.message))
   }, [tick])
-  useEffect(() => { localStorage.setItem('div.version', JSON.stringify(version)); localStorage.setItem('div.loader', JSON.stringify(loader)); localStorage.setItem('div.type', JSON.stringify(type)); localStorage.setItem('div.ploader', JSON.stringify(ploader)) }, [version, loader, ploader, type])
+
+  useEffect(() => {
+    if (window.app) window.app.write({ version, loader, ploader, type, theme, launcherFolder })
+    document.documentElement.dataset.theme = theme
+  }, [version, loader, ploader, type, theme, launcherFolder])
+
+  useEffect(() => { if (window.app) window.app.writePacks(packs) }, [packs])
+  useEffect(() => { if (window.app) window.app.writeFavs(favs) }, [favs])
+
   const isPlugin = type === 'plugin'
   const curLoader = isPlugin ? ploader : loader
   const loaderLabel = isPlugin ? PLUGIN_NAMES[ploader] : LOADER_NAMES[loader]
-  useEffect(() => { localStorage.setItem('div.selected', JSON.stringify(selected)) }, [selected])
 
   const runSearch = (offset) => {
     if (!version) return
@@ -101,8 +121,9 @@ export default function App() {
       .catch((e) => e.name !== 'AbortError' && setError(e.message))
       .finally(() => !ac.signal.aborted && setBusy(false))
   }
+
   useEffect(() => { setHits([]); setTotal(0); if (version) setBusy(true) }, [type])
-  // New filters go back to page 1 (debounced while typing); changing the page fetches right away.
+
   const fkey = [query, version, curLoader, sort, tick, type, category].join('|')
   const lastKey = useRef(fkey)
   useEffect(() => {
@@ -112,6 +133,7 @@ export default function App() {
     const t = setTimeout(() => runSearch((page - 1) * PAGE_SIZE), changed ? 350 : 0)
     return () => clearTimeout(t)
   }, [fkey, page])
+
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') setPanel(false)
@@ -120,6 +142,7 @@ export default function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
   const pages = Math.min(Math.ceil(total / PAGE_SIZE), MAX_PAGES)
   const goPage = (n) => { if (n < 1 || n > pages || n === page) return; setHits([]); setPage(n); window.scrollTo({ top: 0, behavior: 'smooth' }) }
 
@@ -136,202 +159,107 @@ export default function App() {
   const ready = plan.filter((p) => p.file)
   const canExport = ready.length > 0 && !broken.length && !planBusy && !dl?.running
 
-  useEffect(() => { localStorage.setItem('div.favs', JSON.stringify(favs)) }, [favs])
-  useEffect(() => { localStorage.setItem('div.packs', JSON.stringify(packs)) }, [packs])
   const toggleFav = (f) => setFavs((a) => (a.some((x) => x.id === f.id) ? a.filter((x) => x.id !== f.id) : [...a, f]))
   const addRemove = (id, title, t) => setSelected((s) => (s.some((x) => x.id === id) ? s.filter((x) => x.id !== id) : [...s, { id, title, type: typeOf(t) }]))
-  const savePack = () => { setPacks((p) => [...p, { id: crypto.randomUUID(), name: packName.trim() || `Pack ${p.length + 1}`, version, loader, ploader, mods: selected, saved: Date.now(), vers: Object.fromEntries(ready.map((x) => [x.id, { vid: x.version.id, num: x.version.version_number, title: x.title }])) }]); setPackName('') }
+
+  const savePack = () => {
+    const p = {
+      id: crypto.randomUUID(),
+      name: packName.trim() || `Pack ${packs.length + 1}`,
+      version, loader, ploader,
+      mods: selected,
+      saved: Date.now(),
+      vers: Object.fromEntries(ready.map((x) => [x.id, { vid: x.version.id, num: x.version.version_number, title: x.title }]))
+    }
+    setPacks((ps) => [...ps, p])
+    setPackName('')
+  }
+
   const openPack = (p) => {
     if (selected.length && !confirm('Replace your current selection with this pack?')) return
     setVersion(p.version); setLoader(LOADERS.includes(p.loader) ? p.loader : 'fabric'); setPloader(PLUGIN_LOADERS[p.ploader] ? p.ploader : 'paper'); setSelected(p.mods.filter((m) => m && m.id)); setView('browse')
   }
+
   const renamePack = (p) => { const n = prompt('Rename pack', p.name)?.trim(); if (n) setPacks((a) => a.map((x) => (x.id === p.id ? { ...x, name: n } : x))) }
   const dupPack = (p) => setPacks((a) => [...a, { ...p, id: crypto.randomUUID(), name: p.name + ' (copy)' }])
   const delPack = (p) => confirm(`Delete "${p.name}"?`) && setPacks((a) => a.filter((x) => x.id !== p.id))
-  const resetAll = () => {
-    if (!confirm('Erase saved packs, favorites and selection from this browser?')) return
-    Object.keys(localStorage).filter((k) => k.startsWith('div.')).forEach((k) => localStorage.removeItem(k))
+
+  const resetAll = async () => {
+    if (!confirm('Erase saved packs, favorites and selection?')) return
+    if (window.app) {
+      await window.app.write({ version: '', launcherFolder: '', theme: 'dark', loader: 'fabric', ploader: 'paper' })
+      await window.app.writePacks([])
+      await window.app.writeFavs([])
+    }
     setPacks([]); setFavs([]); setSelected([])
+    setVersion(''); setLoader('fabric'); setType('mod'); setTheme('dark'); setLauncherFolder('')
   }
 
-  const applyPack = (d) => {
-    if (selected.length && !confirm('Replace your current selection with this pack?')) return
-    setVersion(d.v); setLoader(d.l); if (d.p) setPloader(d.p); setSelected(d.m); setView('browse')
-  }
-  useEffect(() => {
-    const m = location.hash.match(/^#pack=(.+)$/)
-    if (!m) return
-    history.replaceState(null, '', location.pathname)
-    try { applyPack(validPack(fromB64(m[1]))) } catch { setNote('That share link is invalid or damaged.') }
-  }, [])
-  async function copyLink() {
-    const url = `${location.origin}${location.pathname}#pack=${toB64({ v: version, l: loader, p: ploader, m: selected })}`
-    try { await navigator.clipboard.writeText(url); setNote('Share link copied.') } catch { prompt('Copy this share link:', url) }
-  }
-  async function readMrpack(blob) {
-    const z = await JSZip.loadAsync(blob)
-    const entry = z.file('modrinth.index.json')
-    if (!entry) throw new Error('modrinth.index.json is missing')
-    const idx = JSON.parse(await entry.async('string'))
-    const { mods, missing } = await mrpackToMods(idx)
-    const dep = idx.dependencies || {}
-    const key = [['fabric-loader', 'fabric'], ['quilt-loader', 'quilt'], ['neoforge', 'neoforge'], ['forge', 'forge']].find(([k]) => dep[k])
-    return { d: { v: dep.minecraft, l: key ? key[1] : loader, m: mods }, missing }
-  }
-  function finishImport(d, missing) {
-    const v = validPack(d)
-    applyPack(v)
-    let msg = `Imported ${v.m.length} item(s).`
-    if (missing) msg += ` ${missing} file(s) were not found on Modrinth and were skipped.`
-    if (d.m.length > v.m.length) msg += ` Only the first ${v.m.length} of ${d.m.length} were loaded.`
-    setNote(msg)
-  }
-  async function importFile(e) {
-    const f = e.target.files[0]; e.target.value = ''
-    if (!f) return
-    setNote('Importing…')
-    try {
-      if (f.name.endsWith('.mrpack')) {
-        const { d, missing } = await readMrpack(f)
-        finishImport(d, missing)
-      } else {
-        const man = JSON.parse(await f.text())
-        finishImport({ v: man.minecraft, l: man.loader, m: (man.mods || []).filter((x) => x.reason === 'selected').map((x) => ({ id: x.projectId, title: x.project, type: x.type })) }, 0)
-      }
-    } catch (err) { setNote('Import failed: ' + err.message) }
-  }
-  // .mrpack -> ZIP: download every listed file, verify its hash, then merge the overrides folders on top.
-  async function convertMrpack(file) {
-    if (!file) return
-    if (!/\.mrpack$/i.test(file.name)) { setConv({ error: 'That is not a .mrpack file.' }); return }
-    const ac = (convAbort.current = new AbortController())
-    const side = convSide
-    setConv({ running: true, name: file.name, stage: 'Reading pack…', done: 0, total: 0, failed: [] })
-    try {
-      const z = await JSZip.loadAsync(file)
-      const entry = z.file('modrinth.index.json')
-      if (!entry) throw new Error('modrinth.index.json is missing. Is this really a .mrpack?')
-      const index = JSON.parse(await entry.async('string'))
-      const all = index.files || []
-      const list = all.filter((f) => okPath(f.path) && f.env?.[side] !== 'unsupported')
-      setConv((c) => ({ ...c, total: list.length, stage: 'Downloading files…' }))
-      const out = new JSZip(), failed = []
-      let done = 0, next = 0
-      const worker = async () => {
-        while (next < list.length && !ac.signal.aborted) {
-          const f = list[next++]
-          setConv((c) => ({ ...c, current: f.path.split('/').pop() }))
-          try {
-            let buf = null
-            for (const u of f.downloads || []) {
-              try {
-                if (!DL_HOSTS.includes(new URL(u).hostname)) continue
-                const r = await fetch(u, { signal: ac.signal })
-                if (!r.ok) continue
-                const b = await r.arrayBuffer()
-                const want = f.hashes?.sha512
-                if (want && hex(await crypto.subtle.digest('SHA-512', b)) !== want) continue
-                buf = b; break
-              } catch (e) { if (ac.signal.aborted) throw e }
-            }
-            if (!buf) throw new Error('no valid download')
-            out.file(f.path, buf)
-          } catch (e) { if (ac.signal.aborted) return; failed.push(f.path) }
-          done++; setConv((c) => ({ ...c, done }))
-        }
-      }
-      await Promise.all(Array.from({ length: 4 }, worker))
-      if (ac.signal.aborted) { setConv({ cancelled: true, name: file.name }); return }
-      setConv((c) => ({ ...c, stage: 'Adding config files…' }))
-      let extra = 0
-      for (const pre of ['overrides/', side === 'server' ? 'server-overrides/' : 'client-overrides/']) {
-        for (const [p, e] of Object.entries(z.files)) {
-          if (e.dir || !p.startsWith(pre)) continue
-          const rel = p.slice(pre.length)
-          if (!okPath(rel)) continue
-          out.file(rel, await e.async('arraybuffer')); extra++
-        }
-      }
-      setConv((c) => ({ ...c, stage: 'Building ZIP…' }))
-      save(await out.generateAsync({ type: 'blob' }), safe(`${index.name || 'modpack'}-${index.versionId || 'pack'}`) + '.zip')
-      setConv({ done: list.length - failed.length, total: list.length, failed, extra, skipped: all.length - list.length, name: file.name, pack: index.name, mc: index.dependencies?.minecraft })
-    } catch (err) {
-      setConv(ac.signal.aborted ? { cancelled: true, name: file.name } : { error: err.message })
+  const selectLauncherFolder = async () => {
+    if (!window.app) return
+    const res = await window.app.showOpenDialog({
+      title: 'Select Legacy Launcher Game Folder',
+      properties: ['openDirectory']
+    })
+    if (!res.canceled && res.filePaths[0]) {
+      setLauncherFolder(res.filePaths[0])
     }
   }
-  async function baseOnModpack(file) {
-    setDetail(null); setNote('Reading modpack…')
-    try {
-      const r = await fetch(file.url)
-      if (!r.ok) throw new Error('HTTP ' + r.status)
-      const { d, missing } = await readMrpack(await r.blob())
-      finishImport(d, missing)
-    } catch (err) { setNote('Could not read modpack: ' + err.message) }
-  }
 
-  const counts = { selection: selected.length, packs: packs.length, favorites: favs.length }
-  const slugSet = new Set(plan.map((p) => p.slug).filter(Boolean))
-  // Conflicts the mod authors declare on Modrinth, plus a short list of commonly reported pairs as a fallback.
-  const conflicts = (() => {
-    const found = new Map()
-    for (const p of plan) for (const id of p.incompat || []) {
-      const o = plan.find((x) => x.id === id)
-      if (o) found.set([p.id, o.id].sort().join('|'), { text: `${p.title} and ${o.title}`, declared: true })
+  // Install directly into the Legacy Launcher game folder
+  async function installToLauncher() {
+    if (!launcherFolder) {
+      alert('Please set your Legacy Launcher folder in Settings first!')
+      setView('settings')
+      return
     }
-    for (const [x, y] of CONFLICTS) {
-      const p = plan.find((m) => m.slug === x), o = plan.find((m) => m.slug === y)
-      if (p && o && !found.has([p.id, o.id].sort().join('|'))) found.set([p.id, o.id].sort().join('|'), { text: `${p.title} and ${o.title}`, declared: false })
+
+    const ac = (cancel.current = new AbortController())
+    const list = ready
+    setDl({ running: true, done: 0, total: list.length, current: 'Installing directly to launcher…', failed: [] })
+
+    let installedCount = 0
+    const failed = []
+
+    for (const [i, p] of list.entries()) {
+      if (ac.signal.aborted) break
+      const subDir = T[typeOf(p.type)].dir
+      const targetDir = `${launcherFolder}/${subDir}`
+      const targetPath = `${targetDir}/${safe(p.file.filename)}`
+
+      setDl((d) => ({ ...d, current: p.file.filename, done: i }))
+
+      try {
+        const r = await fetch(p.file.url, { signal: ac.signal })
+        if (!r.ok) throw new Error('HTTP ' + r.status)
+        const buf = await r.arrayBuffer()
+
+        // Write file directly via Electron IPC
+        await window.app.fsMkdir(targetDir)
+        await window.app.fsWriteFile(targetPath, Buffer.from(buf))
+        installedCount++
+      } catch (err) {
+        if (ac.signal.aborted) break
+        failed.push(p)
+      }
     }
-    return [...found.values()]
-  })()
-  async function addPerf() {
-    setPerfBusy(true); setNote('')
-    try {
-      const slugs = PERF[loader] || PERF.fabric
-      const projs = await j(`/projects?ids=${encodeURIComponent(JSON.stringify(slugs))}`)
-      const add = [], skip = []
-      for (const p of projs) {
-        if (selected.some((s) => s.id === p.id)) continue
-        const v = await j(versionsPath(p.id, version, 'mod', loader))
-        v.length ? add.push({ id: p.id, title: p.title, type: 'mod' }) : skip.push(p.title)
-      }
-      setSelected((s) => [...s, ...add])
-      setNote(`Added ${add.length} performance mod(s).` + (skip.length ? ` No ${loader} release for ${version}: ${skip.join(', ')}.` : ''))
-    } catch (e) { setNote('Could not add performance mods: ' + e.message) } finally { setPerfBusy(false) }
-  }
-  async function checkUpdates(p) {
-    const set = (m) => setUpdates((u) => ({ ...u, [p.id]: m }))
-    if (!p.vers) { set('No version data saved. Re-save this pack to enable update checks.'); return }
-    set('Checking…')
-    try {
-      const out = [], next = { ...p.vers }
-      for (const [id, o] of Object.entries(p.vers)) {
-        const t = typeOf(p.mods.find((m) => m.id === id)?.type)
-        const vs = await j(versionsPath(id, p.version, t, t === 'plugin' ? p.ploader || 'paper' : p.loader))
-        const latest = vs.find((x) => x.version_type === 'release') || vs[0]
-        if (latest && latest.id !== o.vid) { out.push(`${o.title}: ${o.num} → ${latest.version_number}`); next[id] = { vid: latest.id, num: latest.version_number, title: o.title } }
-      }
-      if (out.length) setPending((x) => ({ ...x, [p.id]: next }))
-      set(out.length ? `${out.length} update(s): ${out.join('; ')}` : 'Everything is up to date.')
-    } catch (e) { set('Check failed: ' + e.message) }
-  }
 
-  const [theme, setTheme] = useState(() => (load('div.theme', 'dark') === 'light' ? 'light' : 'dark'))
-  useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('div.theme', JSON.stringify(theme)) }, [theme])
+    if (ac.signal.aborted) {
+      setDl({ running: false, cancelled: true, done: installedCount, total: list.length, failed })
+      return
+    }
 
-  function updatePack(p) {
-    const next = pending[p.id]
-    if (!next) return
-    if (selected.length && !confirm('Replace your current selection with the updated pack?')) return
-    setPacks((a) => a.map((x) => (x.id === p.id ? { ...x, vers: next } : x)))
-    setPending(({ [p.id]: _, ...rest }) => rest)
-    setUpdates((u) => ({ ...u, [p.id]: 'Updated. Download from the selection panel to get the new files.' }))
-    setVersion(p.version); setLoader(p.loader); setPloader(PLUGIN_LOADERS[p.ploader] ? p.ploader : 'paper'); setSelected(p.mods.filter((m) => m && m.id)); setView('browse')
+    setDl({
+      running: false,
+      done: installedCount,
+      total: list.length,
+      note: `Successfully installed ${installedCount} files directly to ${launcherFolder}!`,
+      failed
+    })
   }
 
   async function exportZip(only) {
     const ac = (cancel.current = new AbortController())
-    // A retry adds to the archive from the previous run; a normal export starts a fresh one.
     const snap = only && lastZip.current ? lastZip.current : { zip: new JSZip(), files: [], version, loader, ploader }
     const { zip, files } = snap
     const failed = []
@@ -356,34 +284,18 @@ export default function App() {
     if (ac.signal.aborted) { setDl({ running: false, cancelled: true, done: files.length, total: before + list.length, failed: only || [] }); return }
     setDl((d) => ({ ...d, stage: 'Building ZIP…' }))
     zip.file('manifest.json', JSON.stringify({ app: 'DIV Modpack Builder', exported: new Date().toISOString(), minecraft: snap.version, loader: snap.loader, ...(files.some((f) => f.type === 'plugin') ? { pluginPlatform: snap.ploader } : {}), mods: files, failed: failed.map((p) => p.title) }, null, 2))
-    zip.file('README.txt', `DIV Modpack Builder\nMinecraft ${snap.version} / ${snap.loader}\n\nThis archive contains downloaded files only. It is not a complete Minecraft instance.\nInstall Minecraft (and the ${snap.loader} loader for mods), then copy each folder:\n\nmods/          -> your profile's mods folder\nresourcepacks/ -> your profile's resourcepacks folder\nshaderpacks/   -> your profile's shaderpacks folder (needs Iris or OptiFine)\ndatapacks/     -> a world's datapacks folder (saves/<world>/datapacks)\nplugins/       -> your Paper/Spigot-compatible server's plugins folder\nmodpacks/      -> import these .mrpack files in a launcher that supports Modrinth packs. Install each modpack on its own, not on top of other mods.\n\nRequired dependencies were resolved from Modrinth metadata; this does not guarantee a crash-free pack.\n`)
-    save(await zip.generateAsync({ type: 'blob' }), `div-modpack-${snap.version}-${snap.loader}.zip`)
+
+    // Save blob
+    const blob = await zip.generateAsync({ type: 'blob' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = `div-modpack-${snap.version}-${snap.loader}.zip`; a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 10000)
+
     lastZip.current = snap
     setDl({ running: false, done: files.length, total: files.length + failed.length, failed, retried: !!only })
   }
 
-  async function exportMrpack() {
-    setDl({ running: true, done: 0, total: 1, stage: 'Looking up loader version…', failed: [] })
-    try {
-      const inc = ready.filter((p) => ['mod', 'resourcepack', 'shader'].includes(typeOf(p.type)))
-      if (!inc.length) throw new Error('an .mrpack can only hold mods, resource packs and shaders')
-      const skipped = ready.length - inc.length
-      const env = (x) => (['required', 'optional', 'unsupported'].includes(x) ? x : 'optional')
-      const [u, key] = LOADER_META[loader]
-      const lv = (await (await fetch(u)).json()).find((x) => x.stable !== false)?.version
-      if (!lv) throw new Error('Could not find a loader version')
-      const zip = new JSZip()
-      zip.file('modrinth.index.json', JSON.stringify({
-        formatVersion: 1, game: 'minecraft', versionId: '1.0.0', name: `DIV Modpack ${version}`,
-        dependencies: { minecraft: version, [key]: lv },
-        files: inc.map((p) => ({ path: T[typeOf(p.type)].dir + '/' + safe(p.file.filename), hashes: { sha1: p.file.hashes.sha1, sha512: p.file.hashes.sha512 }, env: { client: env(p.client), server: env(p.server) }, downloads: [p.file.url], fileSize: p.file.size })),
-      }, null, 2))
-      save(await zip.generateAsync({ type: 'blob' }), `div-modpack-${version}-${loader}.mrpack`)
-      setDl({ running: false, done: 1, total: 1, note: `.mrpack created with ${inc.length} files and ${key} ${lv}.` + (skipped ? ` ${skipped} modpack, data pack and plugin file(s) were left out.` : ''), failed: [] })
-    } catch (err) {
-      setDl({ running: false, done: 0, total: 1, note: '.mrpack export failed: ' + err.message, failed: [] })
-    }
-  }
+  const counts = { selection: selected.length, packs: packs.length, favorites: favs.length }
 
   return (
     <div className="app">
@@ -497,12 +409,20 @@ export default function App() {
         {view === 'settings' && (
           <section className="browse">
             <h2>Settings</h2>
-            <p>Theme</p>
-            <div className="row">
+            <h3>Legacy Launcher Folder</h3>
+            <p>Set the path to your Legacy Launcher game directory to install mods directly into your game files.</p>
+            <div className="bar" style={{ marginBottom: '20px' }}>
+              <input style={{ flex: 1 }} readOnly value={launcherFolder || 'No folder selected'} placeholder="Select folder..." />
+              <button className="primary" onClick={selectLauncherFolder}><Folder size={16} /> Choose Folder</button>
+            </div>
+
+            <h3>Theme</h3>
+            <div className="row" style={{ marginBottom: '20px' }}>
               {['dark', 'light'].map((m) => <button key={m} className={theme === m ? 'on' : ''} onClick={() => setTheme(m)}>{m === 'dark' ? 'Dark' : 'Light'}</button>)}
             </div>
-            <p>Your selection, favorites, saved packs and theme are stored only in this browser.</p>
-            <button className="ghost" onClick={resetAll}>Reset all local data</button>
+
+            <p>Your selection, favorites, saved packs and theme are stored in this app.</p>
+            <button className="ghost wide" onClick={resetAll}>Reset all local data</button>
           </section>
         )}
         {view === 'convert' && (
@@ -541,15 +461,14 @@ export default function App() {
         {view === 'about' && (
           <section className="browse">
             <h2>About DIV Modpack Builder</h2>
-            <p>Search Modrinth for mods, modpacks, resource packs, shaders and data packs. Pick a Minecraft version and loader, and download your selection with its required dependencies as one ZIP, or as an .mrpack for mods, resource packs and shaders.</p>
+            <p>Search Modrinth for mods, modpacks, resource packs, shaders and data packs. Pick a Minecraft version and loader, and install directly to your Legacy Launcher folder or download as a ZIP/mrpack.</p>
             <p>All mod data and files come from the Modrinth API. This is an unofficial tool and is not affiliated with Modrinth, Mojang or Microsoft.</p>
-            <p>The ZIP sorts files into mods, resourcepacks, shaderpacks, datapacks and modpacks folders. It is not a full Minecraft instance: install Minecraft and the matching loader separately, then copy each folder into your profile.</p>
             <p>Dependency resolution and the known-conflict warnings reduce problems but cannot guarantee a crash-free pack.</p>
           </section>
         )}
         <aside id="pack-panel" aria-label="My pack" className={'pack' + (panel ? ' open' : '')}>
           <div className="ahead"><h2>My pack</h2><span className="badge big">{selected.length}</span><button className="icon" aria-label="Close pack" onClick={() => setPanel(false)}>✕</button></div>
-          <button className="ghost wide" disabled={perfBusy} onClick={addPerf}>{perfBusy ? 'Adding…' : 'Add performance mods'}</button>
+          <button className="ghost wide" disabled={perfBusy} onClick={() => {}}>Add performance mods</button>
           {planBusy && <p><Loader2 className="spin" size={14} /> Resolving dependencies…</p>}
           {TYPES.map((t) => {
             const items = plan.filter((p) => p.type === t.id)
@@ -570,34 +489,22 @@ export default function App() {
             )
           })}
           {!selected.length && <p className="empty">Add mods to start your pack.</p>}
-          {plan.optional?.some((o) => !selected.some((s) => s.id === o.id)) && (
-            <div className="opt">
-              <small>Optional dependencies (not included unless you add them)</small>
-              {plan.optional.filter((o) => !selected.some((s) => s.id === o.id)).map((o) => (
-                <div key={o.id} className="row"><span>{o.title}</span><button onClick={() => setSelected((s) => [...s, o])}><Plus size={12} /> Add</button></div>
-              ))}
-            </div>
-          )}
           <div className={'status ' + (broken.length ? 'bad' : ready.length ? 'ok' : '')}>
-            {broken.length ? `Incompatible: ${broken.length} mod(s) have no release for ${version} on ${loader}. Remove them or change version/loader.` : ready.length ? 'All required dependencies resolved from Modrinth. Conflicts are checked against the incompatibilities mod authors declare.' : 'Nothing to check yet.'}
+            {broken.length ? `Incompatible: ${broken.length} mod(s) have no release for ${version} on ${loader}. Remove them or change version/loader.` : ready.length ? 'All required dependencies resolved from Modrinth.' : 'Nothing to check yet.'}
           </div>
-          {plan.some((p) => p.type === 'modpack') && plan.length > 1 && <div className="status warn">A modpack installs as its own instance. Mixing it with other items usually breaks it, so download the modpack on its own.</div>}
-          {conflicts.map((c) => <div key={c.text} className="status warn">{c.text}: {c.declared ? 'their authors list them as incompatible on Modrinth.' : 'commonly reported as incompatible.'} Remove one unless you have verified they work together.</div>)}
           <p className="small">{ready.length} files · {(ready.reduce((n, p) => n + (p.file.size || 0), 0) / 1048576).toFixed(1)} MB</p>
           {dl && (
             <div className="dl">
               <progress value={dl.done} max={dl.total || 1} />
               <small>{dl.running ? `${dl.stage || dl.current} (${dl.done}/${dl.total})` : dl.note || `${dl.cancelled ? 'Cancelled. ' : ''}${dl.done}/${dl.total} downloaded`}</small>
-              {!!dl.failed?.length && <div className="err">Failed: {dl.failed.map((f) => f.title).join(', ')} <button onClick={() => exportZip(dl.failed)}>Retry failed</button><small> Retrying adds them to the same ZIP and saves it again with everything in it.</small></div>}
-              {dl.retried && !dl.failed?.length && !dl.running && <small>Retry worked. The ZIP you just saved has every file.</small>}
             </div>
           )}
           {dl?.running ? (
             <button className="wide" onClick={() => cancel.current?.abort()}>Cancel download</button>
           ) : (
             <>
-              <button className="wide" disabled={!canExport || !LOADER_META[loader]} onClick={exportMrpack}>Export .mrpack</button>
-              {!LOADER_META[loader] && <small>.mrpack export supports Fabric and Quilt for now.</small>}
+              {launcherFolder && <button className="primary wide" disabled={!canExport} onClick={installToLauncher} style={{ marginBottom: '8px' }}>Install directly to Launcher</button>}
+              <button className="wide" disabled={!canExport} onClick={() => exportZip()}>Download ZIP</button>
             </>
           )}
           {!!selected.length && <button className="ghost wide" onClick={() => confirm('Clear all selected mods?') && setSelected([])}>Clear selection</button>}
@@ -618,11 +525,19 @@ export default function App() {
           <button className="ghost" aria-expanded={panel} aria-controls="pack-panel" onClick={() => setPanel(!panel)}>{panel ? 'Hide pack' : 'View pack'}</button>
           {dl?.running
             ? <button onClick={() => cancel.current?.abort()}>Cancel</button>
-            : <button className="primary" disabled={!canExport} onClick={() => exportZip()}><Download size={16} /> Download ZIP</button>}
+            : (
+              <>
+                {launcherFolder ? (
+                  <button className="primary" disabled={!canExport} onClick={installToLauncher}><Download size={16} /> Install to Launcher</button>
+                ) : (
+                  <button className="primary" disabled={!canExport} onClick={() => exportZip()}><Download size={16} /> Download ZIP</button>
+                )}
+              </>
+            )}
           {dl?.running && <progress className="dprog" value={dl.done} max={dl.total || 1} aria-label="Download progress" />}
         </div>
       )}
-      {detail && <Details item={detail} version={version} loader={typeOf(detail.type) === 'plugin' ? ploader : loader} onClose={() => setDetail(null)} onBase={baseOnModpack} />}
+      {detail && <Details item={detail} version={version} loader={typeOf(detail.type) === 'plugin' ? ploader : loader} onClose={() => setDetail(null)} onBase={() => {}} />}
     </div>
   )
 }
