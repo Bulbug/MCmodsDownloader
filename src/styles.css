@@ -148,8 +148,8 @@ header .search kbd{font:500 12px var(--mono,ui-monospace,monospace);color:var(--
 .sections .badge{margin-left:0;background:var(--panel2);color:var(--text)}
 main{display:block;max-width:1360px;margin:0 auto;padding:28px clamp(16px,3vw,40px) 150px;box-sizing:border-box}
 .filters{display:flex;align-items:center;gap:12px;margin-bottom:20px}
-.cats{display:flex;gap:8px;overflow-x:auto;flex:1;scrollbar-width:none;padding-bottom:2px}
-.cats::-webkit-scrollbar{display:none}
+.cats{display:flex;gap:8px;overflow-x:auto;flex:1;min-width:0;scrollbar-width:thin;padding-bottom:2px}
+.cats::-webkit-scrollbar{height:4px}.cats::-webkit-scrollbar-thumb{background:var(--line);border-radius:99px}
 .cat{flex:none;min-height:40px;padding:0 16px;border-radius:99px;background:transparent;border:1px solid var(--line);color:var(--text);text-transform:capitalize;font-weight:500}
 .cat.active{background:var(--text);color:var(--bg);border-color:transparent;font-weight:600}
 .count{color:var(--mute);font-size:14px;white-space:nowrap}
