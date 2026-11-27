@@ -3,6 +3,11 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "description": "DIV Modpack Builder - Search and download Minecraft mods from Modrinth",
+  "author": {
+    "name": "Bulbug",
+    "email": "bulbug@example.com"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -35,7 +40,10 @@
     "files": ["dist/**/*", "electron/**/*"],
     "linux": {
       "category": "Game",
-      "target": ["AppImage", "deb"]
+      "target": ["AppImage", "deb"],
+      "desktopName": "DIV Modpack Builder",
+      "maintainer": "Bulbug <bulbug@example.com>",
+      "syncDesktopName": true
     }
   },
   "standard-version": {
