@@ -1,0 +1,75 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '.github/**'
+      - 'README.md'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '.github/**'
+      - 'README.md'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            artifact_name: div-modpack-builder-linux
+          - platform: windows
+            artifact_name: div-modpack-builder-windows
+          - platform: macos
+            artifact_name: div-modpack-builder-macos
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Package Electron app (${{ matrix.platform }})
+        if: matrix.platform == 'linux'
+        run: npx electron-builder --linux
+        continue-on-error: true
+
+      - name: Package Electron app (${{ matrix.platform }})
+        if: matrix.platform == 'windows'
+        run: npx electron-builder --win
+        continue-on-error: true
+
+      - name: Package Electron app (${{ matrix.platform }})
+        if: matrix.platform == 'macos'
+        run: npx electron-builder --mac
+        continue-on-error: true
+
+      - name: List dist-electron contents
+        run: |
+          ls -la dist-electron || echo "dist-electron not found"
+          find dist-electron -type f -name "*.AppImage" -o -name "*.deb" -o -name "*.exe" -o -name "*.zip" -o -name "*.dmg" 2>/dev/null || echo "No binaries found"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            dist-electron/**/*
+            dist/**/*
+          if-no-files-found: error
+          retention-days: 30
