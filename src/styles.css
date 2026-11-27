@@ -39,7 +39,8 @@ button.icon:hover:not(:disabled){color:var(--text);background:var(--panel2);bord
 button.icon.on{color:var(--red);background:none;border-color:transparent}
 button.ghost{background:none;color:var(--mute)}
 button:disabled{opacity:.4;cursor:not-allowed}
-:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+:focus-visible{outline:3px solid var(--teal);outline-offset:3px;outline-radius:6px}
+button,[role="button"],select,input{touch-action:manipulation}
 .wide{width:100%;margin-top:8px}.mobile{display:none}
 
 /* layout */
@@ -173,6 +174,24 @@ main{display:block;max-width:1360px;margin:0 auto;padding:28px clamp(16px,3vw,40
 .addbtn.on{background:var(--teal-bg);color:var(--teal);border:1px solid var(--teal);box-shadow:none}
 .card.picked{border-color:var(--teal)}
 .card.sk{min-height:140px}
+
+/* --- engagement & motion --- */
+:root{--transition:220ms cubic-bezier(0.4,0,0.2,1)}
+.card{transition:transform var(--transition),box-shadow var(--transition),border-color var(--transition),background var(--transition)}
+.card:hover:not(.picked){transform:translateY(-4px);border-color:var(--mute);box-shadow:0 14px 32px rgba(0,0,0,.35)}
+.card:active:not(.picked){transform:scale(0.98);box-shadow:0 6px 14px rgba(0,0,0,.25)}
+.grid .card{animation:card-in var(--transition) both}
+.grid .card:nth-child(1){animation-delay:0ms}
+.grid .card:nth-child(2){animation-delay:40ms}
+.grid .card:nth-child(3){animation-delay:80ms}
+.grid .card:nth-child(4){animation-delay:120ms}
+.grid .card:nth-child(5){animation-delay:160ms}
+.grid .card:nth-child(6){animation-delay:200ms}
+.grid .card:nth-child(n+7){animation-delay:240ms}
+@keyframes card-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.tile:hover:not(.active){transform:translateY(-2px);border-color:var(--mute)}
+.tile:active:not(.active){transform:scale(0.97)}
+.search:focus-within{border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-bg),0 4px 12px rgba(0,0,0,.25)}
 /* .mrpack converter */
 .convert .seg{display:inline-flex;margin:4px 0 16px}
 .drop{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;padding:48px 24px;border:2px dashed var(--line);border-radius:24px;background:var(--glass);text-align:center;cursor:pointer;color:var(--mute)}
@@ -227,4 +246,4 @@ aside.pack.open{display:block}
 @media(max-width:700px){.grid{grid-template-columns:minmax(0,1fr)}.filters{flex-wrap:wrap}.cats{flex:1 1 100%}.filters select{flex:1;min-width:0}header .search kbd{display:none}}
 @media(max-width:520px){main{padding-bottom:180px}.dock{flex-wrap:wrap;row-gap:8px}.dtxt{flex:1 1 100%;display:flex;justify-content:space-between;align-items:baseline;gap:8px}.dock button{flex:1}}
 @media(max-width:420px){.pager{gap:4px}.pager button{min-width:40px;padding:0 6px}}
-@media(prefers-reduced-motion:reduce){*{transition:none!important}.spin,.card.sk{animation:none}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}.grid .card{opacity:1;transform:none}}
