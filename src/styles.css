@@ -148,8 +148,11 @@ header .search kbd{font:500 12px var(--mono,ui-monospace,monospace);color:var(--
 .sections .badge{margin-left:0;background:var(--panel2);color:var(--text)}
 main{display:block;max-width:1360px;margin:0 auto;padding:28px clamp(16px,3vw,40px) 150px;box-sizing:border-box}
 .filters{display:flex;align-items:center;gap:12px;margin-bottom:20px}
-.cats{display:flex;gap:8px;overflow-x:auto;flex:1;min-width:0;scrollbar-width:thin;padding-bottom:2px}
-.cats::-webkit-scrollbar{height:4px}.cats::-webkit-scrollbar-thumb{background:var(--line);border-radius:99px}
+.cats{display:flex;gap:8px;overflow-x:auto;flex:1;min-width:0;padding-bottom:8px;scrollbar-width:thin;scrollbar-color:var(--copper) var(--panel2);-webkit-overflow-scrolling:touch}
+.cats::-webkit-scrollbar{height:6px}
+.cats::-webkit-scrollbar-track{background:var(--panel2);border-radius:99px}
+.cats::-webkit-scrollbar-thumb{background:var(--grad);border-radius:99px;box-shadow:0 0 8px var(--glow1)}
+.cats::-webkit-scrollbar-thumb:hover{filter:brightness(1.15)}
 .cat{flex:none;min-height:40px;padding:0 16px;border-radius:99px;background:transparent;border:1px solid var(--line);color:var(--text);text-transform:capitalize;font-weight:500}
 .cat.active{background:var(--text);color:var(--bg);border-color:transparent;font-weight:600}
 .count{color:var(--mute);font-size:14px;white-space:nowrap}
