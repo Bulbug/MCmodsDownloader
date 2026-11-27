@@ -40,10 +40,7 @@
     "files": ["dist/**/*", "electron/**/*"],
     "linux": {
       "category": "Game",
-      "target": ["AppImage", "deb"],
-      "desktopName": "DIV Modpack Builder",
-      "maintainer": "Bulbug <bulbug@example.com>",
-      "syncDesktopName": true
+      "target": ["AppImage", "deb"]
     }
   },
   "standard-version": {
