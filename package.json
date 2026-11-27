@@ -41,8 +41,6 @@
     "linux": {
       "category": "Game",
       "target": ["AppImage", "deb"],
-      "desktopName": "DIV Modpack Builder",
-      "syncDesktopName": true
     },
     "win": {
       "target": ["nsis", "portable"]
