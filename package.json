@@ -40,7 +40,7 @@
     "files": ["dist/**/*", "electron/**/*"],
     "linux": {
       "category": "Game",
-      "target": ["AppImage", "deb"],
+      "target": ["AppImage", "deb"]
     },
     "win": {
       "target": ["nsis", "portable"]
