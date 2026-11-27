@@ -76,6 +76,8 @@ export default function App() {
   const lastZip = useRef(null)
   const searchRef = useRef(null)
   const convAbort = useRef(null)
+  const [searchHist, setSearchHist] = useState([])
+const [toasts, setToasts] = useState([])
 
   useEffect(() => {
     async function init() {
@@ -112,12 +114,17 @@ export default function App() {
   const loaderLabel = isPlugin ? PLUGIN_NAMES[ploader] : LOADER_NAMES[loader]
 
   const runSearch = (offset) => {
-    if (!version) return
+    if (!version || !query.trim()) return
     abort.current?.abort()
     const ac = (abort.current = new AbortController())
     setBusy(true); setError('')
     search({ query, version, loader: curLoader, sort, offset, type, category }, ac.signal)
-      .then((r) => { setHits(r.hits); setTotal(r.total_hits) })
+      .then((r) => {
+        setHits(r.hits); setTotal(r.total_hits)
+        if (query.trim() && !searchHist.some((s) => s.query === query.trim())) {
+          setSearchHist((h) => [{ query: query.trim(), version, loader: curLoader, type }.concat(h).slice(0, 8)])
+        }
+      })
       .catch((e) => e.name !== 'AbortError' && setError(e.message))
       .finally(() => !ac.signal.aborted && setBusy(false))
   }
@@ -155,6 +162,11 @@ export default function App() {
   }, [selected, version, loader, ploader])
 
   const toggle = (h) => setSelected((s) => (s.some((x) => x.id === h.project_id) ? s.filter((x) => x.id !== h.project_id) : [...s, { id: h.project_id, title: h.title, type: typeOf(type) }]))
+  const toggleLog = (h) => {
+    const on = selected.some((x) => x.id === h.project_id)
+    toggle(h)
+    toast(on ? 'Removed from pack' : 'Added to pack', on ? 'info' : 'success', 2500)
+  }
   const broken = plan.filter((p) => p.error)
   const ready = plan.filter((p) => p.file)
   const canExport = ready.length > 0 && !broken.length && !planBusy && !dl?.running
@@ -173,6 +185,7 @@ export default function App() {
     }
     setPacks((ps) => [...ps, p])
     setPackName('')
+    toast(`Pack "${p.name}" saved`, 'success', 3000)
   }
 
   const openPack = (p) => {
@@ -183,6 +196,39 @@ export default function App() {
   const renamePack = (p) => { const n = prompt('Rename pack', p.name)?.trim(); if (n) setPacks((a) => a.map((x) => (x.id === p.id ? { ...x, name: n } : x))) }
   const dupPack = (p) => setPacks((a) => [...a, { ...p, id: crypto.randomUUID(), name: p.name + ' (copy)' }])
   const delPack = (p) => confirm(`Delete "${p.name}"?`) && setPacks((a) => a.filter((x) => x.id !== p.id))
+
+  const toast = (msg, type = 'info', dur = 4000) => {
+    const id = Date.now()
+    setToasts((t) => [...t, { id, msg, type, dur }])
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), dur)
+  }
+
+  const retryFailed = () => {
+    if (!dl?.failed?.length || dl?.running) return
+    setSelected((s) => [...s, ...dl.failed.map((f) => ({ id: f.id, title: f.title, type: f.type }))])
+    setDl(null)
+  }
+
+  const addPerfMods = async () => {
+    if (perfBusy) return
+    setPerfBusy(true)
+    try {
+      const perf = PERF[curLoader] || []
+      const existing = new Set(selected.map((s) => s.id))
+      const toAdd = perf.filter((id) => !existing.has(id))
+      if (!toAdd.length) {
+        setNote('Performance mods already added!')
+        setPerfBusy(false)
+        return
+      }
+      setSelected((s) => [...s, ...toAdd.map((id) => ({ id, title: id, type: typeOf(type) }))])
+      toast(`Added ${toAdd.length} performance mod(s)`, 'success', 3000)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setPerfBusy(false)
+    }
+  }
 
   const resetAll = async () => {
     if (!confirm('Erase saved packs, favorites and selection?')) return
@@ -302,6 +348,14 @@ export default function App() {
       <header>
         <div className="brand" title="DIV Modpack Builder"><svg className="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 28 9.5 16 16 4 9.5z" fill="var(--copper)"/><path d="M16 16v13L4 22.5v-13z" fill="var(--teal)" opacity=".85"/><path d="M16 16v13l12-6.5v-13z" fill="var(--teal)" opacity=".5"/></svg><span><b>DIV</b></span></div>
         <label className="search"><Search size={18} /><input ref={searchRef} placeholder={`Search ${T[type].label.toLowerCase()} for Minecraft ${version}`} aria-label="Search" value={query} onChange={(e) => { setQuery(e.target.value); if (view !== 'browse') setView('browse') }} /><kbd aria-hidden="true">/</kbd></label>
+        {searchHist.length > 0 && (
+          <div className="recent-searches" style={{ marginLeft: '10px', display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <small style={{ color: 'var(--mute)' }}>Recent:</small>
+            {searchHist.slice(0, 5).map((s, i) => (
+              <button key={i} className="icon" size={16} onClick={() => { setQuery(s.query); setVersion(s.version); setType(s.type); setLoader(LOADERS.includes(s.loader) ? s.loader : 'fabric'); setPloader(PLUGIN_LOADERS[s.loader] ? s.loader : 'paper'); setView('browse') }} style={{ padding: '4px 8px', fontSize: '12px', borderRadius: '6px' }}>{s.query}</button>
+            ))}
+          </div>
+        )}
         <select value={version} onChange={(e) => setVersion(e.target.value)} aria-label="Minecraft version">{versions.map((v) => <option key={v}>{v}</option>)}</select>
         <div className="seg" role="group" aria-label={isPlugin ? 'Server platform' : 'Mod loader'}>{(isPlugin ? Object.keys(PLUGIN_LOADERS) : LOADERS).map((l) => <button key={l} className={curLoader === l ? 'active' : ''} aria-pressed={curLoader === l} onClick={() => (isPlugin ? setPloader(l) : setLoader(l))}>{isPlugin ? PLUGIN_NAMES[l] : LOADER_NAMES[l]}</button>)}</div>
         <button className="icon" aria-label="Toggle theme" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}</button>
@@ -347,7 +401,7 @@ export default function App() {
                       <button className={'icon' + (favs.some((f) => f.id === h.project_id) ? ' on' : '')} aria-label={`Favorite ${h.title}`} onClick={() => toggleFav({ id: h.project_id, title: h.title, icon: h.icon_url, slug: h.slug, type })}><Heart size={14} /></button>
                     </div>
                   </div>
-                  <button className={'addbtn' + (on ? ' on' : '')} aria-pressed={on} aria-label={`Add ${h.title} to pack`} onClick={() => toggle(h)}>{on ? <Check size={18} /> : <Plus size={20} />}</button>
+                  <button className={'addbtn' + (on ? ' on' : '')} aria-pressed={on} aria-label={`Add ${h.title} to pack`} onClick={() => toggleLog(h)}>{on ? <Check size={18} /> : <Plus size={20} />}</button>
                 </article>
               )
             })}
@@ -468,7 +522,7 @@ export default function App() {
         )}
         <aside id="pack-panel" aria-label="My pack" className={'pack' + (panel ? ' open' : '')}>
           <div className="ahead"><h2>My pack</h2><span className="badge big">{selected.length}</span><button className="icon" aria-label="Close pack" onClick={() => setPanel(false)}>✕</button></div>
-          <button className="ghost wide" disabled={perfBusy} onClick={() => {}}>Add performance mods</button>
+          <button className="ghost wide" disabled={perfBusy} onClick={addPerfMods}>Add performance mods</button>
           {planBusy && <p><Loader2 className="spin" size={14} /> Resolving dependencies…</p>}
           {TYPES.map((t) => {
             const items = plan.filter((p) => p.type === t.id)
@@ -497,6 +551,7 @@ export default function App() {
             <div className="dl">
               <progress value={dl.done} max={dl.total || 1} />
               <small>{dl.running ? `${dl.stage || dl.current} (${dl.done}/${dl.total})` : dl.note || `${dl.cancelled ? 'Cancelled. ' : ''}${dl.done}/${dl.total} downloaded`}</small>
+              {dl.failed?.length && !dl.running && <button className="ghost wide" onClick={retryFailed}>Retry {dl.failed.length} failed</button>}
             </div>
           )}
           {dl?.running ? (
@@ -537,7 +592,14 @@ export default function App() {
           {dl?.running && <progress className="dprog" value={dl.done} max={dl.total || 1} aria-label="Download progress" />}
         </div>
       )}
-      {detail && <Details item={detail} version={version} loader={typeOf(detail.type) === 'plugin' ? ploader : loader} onClose={() => setDetail(null)} onBase={() => {}} />}
+      {detail && <Details item={detail} version={version} loader={typeOf(detail.type) === 'plugin' ? ploader : loader} onClose={() => setDetail(null)} onBase={(base) => { setNote('Modpack base imported.'); setVersion(detail.version); setDetail(null); }} />}
+      <div className="toast-container" style={{ position: 'fixed', bottom: '100px', right: '20px', zIndex: 1000, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast toast-${t.type}`} style={{ padding: '10px 16px', borderRadius: '10px', background: t.type === 'error' ? 'var(--red)' : t.type === 'success' ? 'var(--teal)' : 'var(--panel)', color: t.type === 'error' || t.type === 'success' ? '#fff' : 'var(--text)', border: '1px solid var(--line)', boxShadow: 'var(--shadow)', animation: 'slideIn .2s ease both' }}>
+            {t.msg}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
