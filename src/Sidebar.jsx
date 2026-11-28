@@ -1,5 +1,7 @@
-import { Box, Boxes, Package, Paintbrush, Braces, Glasses, Plug, ArrowLeft, ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react'
-import { TYPES, T, PLUGIN_LOADERS, PLUGIN_NAMES } from './types.js'
+import { Box, Boxes, Package, Paintbrush, Braces, Glasses, Plug, ChevronLeft, ChevronRight, Heart, Settings, Info } from 'lucide-react'
+import { TYPES, PLUGIN_LOADERS, PLUGIN_NAMES } from './types.js'
+
+const LOADER_NAMES = { fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt' }
 
 const TYPE_ICONS = {
   mod: <Box size={20} />,
@@ -11,11 +13,11 @@ const TYPE_ICONS = {
 }
 
 const NAV_SECTIONS = [
-  { id: 'convert', label: 'Convert .mrpack', icon: ArrowRight },
-  { id: 'packs', label: 'Saved modpacks', icon: Package },
-  { id: 'favorites', label: 'Favorites', icon: 'heart' },
-  { id: 'settings', label: 'Settings', icon: 'cog' },
-  { id: 'about', label: 'About', icon: 'info' }
+  { id: 'convert', label: 'Convert .mrpack', icon: <ChevronRight size={20} /> },
+  { id: 'packs', label: 'Saved modpacks', icon: <Package size={20} /> },
+  { id: 'favorites', label: 'Favorites', icon: <Heart size={20} /> },
+  { id: 'settings', label: 'Settings', icon: <Settings size={20} /> },
+  { id: 'about', label: 'About', icon: <Info size={20} /> }
 ]
 
 export default function Sidebar({
@@ -40,6 +42,16 @@ export default function Sidebar({
     setView(id)
   }
 
+  const handleLoaderChange = (e) => {
+    const value = e.target.value
+    if (isPlugin) setPloader(value)
+    else setLoader(value)
+  }
+
+  const loaderOptions = isPlugin
+    ? Object.entries(PLUGIN_LOADERS).map(([key]) => [key, PLUGIN_NAMES[key] || key])
+    : Object.entries(LOADER_NAMES)
+
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`} role="navigation" aria-label="Main navigation">
       {/* Collapse toggle */}
@@ -54,9 +66,7 @@ export default function Sidebar({
 
       {/* Type tiles */}
       <div className="sidebar-section">
-        {(!collapsed || collapsed) && (
-          <div className="sidebar-section-title" aria-hidden="true">Content Types</div>
-        )}
+        <div className="sidebar-section-title" aria-hidden="true">Content Types</div>
         <div className="type-tiles" role="group" aria-label="Content types">
           {TYPES.map((t) => (
             <button
@@ -73,6 +83,23 @@ export default function Sidebar({
         </div>
       </div>
 
+      {/* Loader / platform selector */}
+      {!collapsed && (
+        <div className="sidebar-section">
+          <div className="sidebar-section-title" aria-hidden="true">{isPlugin ? 'Server Platform' : 'Loader'}</div>
+          <select
+            className="loader-select"
+            value={curLoader}
+            onChange={handleLoaderChange}
+            aria-label={isPlugin ? 'Server platform' : 'Mod loader'}
+          >
+            {loaderOptions.map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Sections */}
       <div className="sidebar-section">
         {!collapsed && (
@@ -86,24 +113,7 @@ export default function Sidebar({
               aria-pressed={view === section.id}
               onClick={() => handleNavClick(section.id)}
             >
-              {section.icon === 'heart' ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                  <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-                </svg>
-              ) : section.icon === 'cog' ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                </svg>
-              ) : section.icon === 'info' ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M12 16v-4" />
-                  <path d="M12 8h.01" />
-                </svg>
-              ) : (
-                <section.icon size={20} />
-              )}
+              {section.icon}
               {!collapsed && (
                 <span className="nav-label">{section.label}</span>
               )}

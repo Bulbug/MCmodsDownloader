@@ -3,6 +3,7 @@ import JSZip from 'jszip'
 import { Search, Package, Download, Trash2, Plus, Check, AlertTriangle, ExternalLink, Loader2, Heart, Settings, Info, Sun, Moon, Bookmark, Box, Boxes, Paintbrush, Braces, Glasses, Plug, ChevronLeft, ChevronRight, Upload, Folder, ArrowLeft, ArrowRight, Heart as HeartIcon, Cog, Info as InfoIcon } from 'lucide-react'
 import Details from './Details.jsx'
 import Sidebar from './Sidebar.jsx'
+import ToastContainer from './ToastContainer.jsx'
 import { gameVersions, search, resolve, mrpackToMods, j, versionsPath } from './api.js'
 import { TYPES, T, typeOf, PLUGIN_LOADERS, PLUGIN_NAMES, CATS } from './types.js'
 
@@ -202,7 +203,6 @@ const [toasts, setToasts] = useState([])
   const toast = (msg, type = 'info', dur = 4000) => {
     const id = Date.now()
     setToasts((t) => [...t, { id, msg, type, dur }])
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), dur)
   }
 
   const retryFailed = () => {
@@ -604,13 +604,7 @@ const [toasts, setToasts] = useState([])
         </div>
       )}
       {detail && <Details item={detail} version={version} loader={typeOf(detail.type) === 'plugin' ? ploader : loader} onClose={() => setDetail(null)} onBase={(base) => { setNote('Modpack base imported.'); setVersion(detail.version); setDetail(null); }} />}
-      <div className="toast-container" style={{ position: 'fixed', bottom: '100px', right: '20px', zIndex: 1000, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast toast-${t.type}`} style={{ padding: '10px 16px', borderRadius: '10px', background: t.type === 'error' ? 'var(--red)' : t.type === 'success' ? 'var(--teal)' : 'var(--panel)', color: t.type === 'error' || t.type === 'success' ? '#fff' : 'var(--text)', border: '1px solid var(--line)', boxShadow: 'var(--shadow)', animation: 'slideIn .2s ease both' }}>
-            {t.msg}
-          </div>
-        ))}
-      </div>
+      <ToastContainer toasts={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
     </div>
   )
 }
