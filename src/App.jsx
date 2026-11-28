@@ -460,6 +460,18 @@ const [toasts, setToasts] = useState([])
     setVersion(p.version); setLoader(p.loader); setPloader(PLUGIN_LOADERS[p.ploader] ? p.ploader : 'paper'); setSelected(p.mods.filter((m) => m && m.id)); setView('browse')
   }
 
+  const applyPack = (d) => {
+    if (selected.length && !confirm('Replace your current selection with this pack?')) return
+    setVersion(d.v); setLoader(d.l); if (d.p) setPloader(d.p); setSelected(d.m); setView('browse')
+  }
+
+  useEffect(() => {
+    const m = location.hash.match(/^#pack=(.+)$/)
+    if (!m) return
+    history.replaceState(null, '', location.pathname)
+    try { applyPack(validPack(fromB64(m[1]))) } catch { setNote('That share link is invalid or damaged.') }
+  }, [])
+
   const counts = { selection: selected.length, packs: packs.length, favorites: favs.length }
 
   return (
