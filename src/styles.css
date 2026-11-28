@@ -336,6 +336,10 @@ aside.pack.open{display:block}
   padding: 0 8px;
 }
 
+.sidebar.collapsed .type-tiles {
+  grid-template-columns: 1fr;
+}
+
 .type-tile {
   display: flex;
   flex-direction: column;

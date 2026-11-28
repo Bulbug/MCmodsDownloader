@@ -1,4 +1,4 @@
-import { Boxes, Package, Paintbrush, Braces, Glasses, Plug, ArrowLeft, ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Box, Boxes, Package, Paintbrush, Braces, Glasses, Plug, ArrowLeft, ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react'
 import { TYPES, T, PLUGIN_LOADERS, PLUGIN_NAMES } from './types.js'
 
 const TYPE_ICONS = {

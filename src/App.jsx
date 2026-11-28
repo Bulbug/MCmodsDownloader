@@ -383,54 +383,6 @@ const [toasts, setToasts] = useState([])
             </div>
             {isPlugin && <div className="note">Showing plugins that run on {PLUGIN_NAMES[ploader]}, including {PLUGIN_LOADERS[ploader].slice(1).join(' and ') || 'its own'} plugins. Downloads go in a <code>plugins/</code> folder.</div>}
           </div>
-        <section className="browse" hidden={view !== 'browse'}>
-          <h1 className="sr">{T[type].label} for Minecraft {version}{T[type].loader ? ` on ${loaderLabel}` : ''}</h1>
-          <div className="filters">
-            <div className="cats" role="group" aria-label="Category">
-              {['', ...CATS[type]].map((c) => <button key={c || 'all'} className={'cat' + (category === c ? ' active' : '')} aria-pressed={category === c} onClick={() => setCategory(c)}>{c ? c.replace(/-/g, ' ') : 'All'}</button>)}
-            </div>
-            <span className="count" aria-live="polite">{total ? `${total.toLocaleString()} results` : ''}</span>
-            <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort">{SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
-          </div>
-          {isPlugin && <div className="note">Showing plugins that run on {PLUGIN_NAMES[ploader]}, including {PLUGIN_LOADERS[ploader].slice(1).join(' and ') || 'its own'} plugins. Downloads go in a <code>plugins/</code> folder.</div>}
-          {error && <div className="err"><AlertTriangle size={16} /> {error} <button onClick={() => setTick((t) => t + 1)}>Retry</button></div>}
-          {!busy && !error && !hits.length && <p className="empty">No {T[type].label.toLowerCase()} found for Minecraft {version}{T[type].loader ? ` on ${loaderLabel}` : ''}. Try another search{T[type].loader ? ', version or loader' : ' or version'}.</p>}
-          <div className="grid">
-            {busy && !hits.length && Array.from({ length: 6 }, (_, i) => <div key={i} className="card sk" aria-hidden="true" />)}
-            {hits.map((h) => {
-              const on = selected.some((x) => x.id === h.project_id)
-              return (
-                <article key={h.project_id} className={'card' + (on ? ' picked' : '')}>
-                  {type !== 'mod' && h.featured_gallery && <img className="shot" src={h.featured_gallery} alt="" loading="lazy" />}
-                  {h.icon_url ? <img src={h.icon_url} alt="" width="56" height="56" loading="lazy" /> : <div className="ph" aria-hidden="true"><Package size={22} /></div>}
-                  <div className="body">
-                    <h3>{h.title}</h3>
-                    <span className="by">by {h.author}</span>
-                    <p>{h.description}</p>
-                    <div className="meta">
-                      <span className="stat" title="Downloads"><Download size={12} /> {fmt(h.downloads)}</span>
-                      <span className="stat" title="Follows"><Heart size={12} /> {fmt(h.follows || 0)}</span>
-                      {h.display_categories?.slice(0, 3).map((c) => <span key={c} className="chip">{c}</span>)}
-                    </div>
-                    <div className="row">
-                      <button onClick={() => setDetail({ id: h.project_id, title: h.title, type })}>Details</button>
-                      <button className={'icon' + (favs.some((f) => f.id === h.project_id) ? ' on' : '')} aria-label={`Favorite ${h.title}`} onClick={() => toggleFav({ id: h.project_id, title: h.title, icon: h.icon_url, slug: h.slug, type })}><Heart size={14} /></button>
-                    </div>
-                  </div>
-                  <button className={'addbtn' + (on ? ' on' : '')} aria-pressed={on} aria-label={`Add ${h.title} to pack`} onClick={() => toggleLog(h)}>{on ? <Check size={18} /> : <Plus size={20} />}</button>
-                </article>
-              )
-            })}
-          </div>
-          {busy && <p className="empty"><Loader2 className="spin" size={16} /> Loading…</p>}
-          {pages > 1 && (
-            <nav className="pager" aria-label="Pagination">
-              <button aria-label="Previous page" disabled={page === 1 || busy} onClick={() => goPage(page - 1)}><ChevronLeft size={18} /></button>
-              {pageList(page, pages).map((n, i) => n === '…' ? <span key={'e' + i} className="gap" aria-hidden="true">…</span> : <button key={n} className={n === page ? 'active' : ''} aria-label={`Page ${n}`} aria-current={n === page ? 'page' : undefined} disabled={busy} onClick={() => goPage(n)}>{n}</button>)}
-              <button aria-label="Next page" disabled={page === pages || busy} onClick={() => goPage(page + 1)}><ChevronRight size={18} /></button>
-            </nav>
-          )}
-        </section>
         {view === 'browse' && (
             <section className="browse" aria-labelledby="results-heading">
               <h1 id="results-heading" className="sr">{T[type].label} for Minecraft {version}{T[type].loader ? ` on ${loaderLabel}` : ''}</h1>
