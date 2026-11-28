@@ -117,7 +117,7 @@ const [toasts, setToasts] = useState([])
   const loaderLabel = isPlugin ? PLUGIN_NAMES[ploader] : LOADER_NAMES[loader]
 
   const runSearch = (offset) => {
-    if (!version || !query.trim()) return
+    if (!version) return
     abort.current?.abort()
     const ac = (abort.current = new AbortController())
     setBusy(true); setError('')
