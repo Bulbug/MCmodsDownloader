@@ -3,6 +3,7 @@ import JSZip from 'jszip'
 import { Search, Package, Download, Trash2, Plus, Check, AlertTriangle, ExternalLink, Loader2, Heart, Settings, Info, Sun, Moon, Bookmark, Box, Boxes, Paintbrush, Braces, Glasses, Plug, ChevronLeft, ChevronRight, Upload, Folder, ArrowLeft, ArrowRight, Heart as HeartIcon, Cog, Info as InfoIcon } from 'lucide-react'
 import Details from './Details.jsx'
 import Sidebar from './Sidebar.jsx'
+import PackPanel from './PackPanel.jsx'
 import ToastContainer from './ToastContainer.jsx'
 import { gameVersions, search, resolve, mrpackToMods, j, versionsPath } from './api.js'
 import { TYPES, T, typeOf, PLUGIN_LOADERS, PLUGIN_NAMES, CATS } from './types.js'
@@ -531,52 +532,23 @@ const [toasts, setToasts] = useState([])
             </section>
           )}
         </main>
-        <aside className="pack-panel" id="pack-panel" aria-label="My pack">
-          <div className="ahead"><h2>My pack</h2><span className="badge big">{selected.length}</span><button className="icon" aria-label="Close pack" onClick={() => setPanel(false)}>✕</button></div>
-          <button className="ghost wide" disabled={perfBusy} onClick={addPerfMods}>Add performance mods</button>
-          {planBusy && <p><Loader2 className="spin" size={14} /> Resolving dependencies…</p>}
-          {TYPES.map((t) => {
-            const items = plan.filter((p) => p.type === t.id)
-            if (!items.length) return null
-            return (
-              <div key={t.id} className="grp">
-                <h4>{t.label} <i className="badge">{items.length}</i></h4>
-                <ul>
-                  {items.map((p) => (
-                    <li key={p.id} className={p.error ? 'bad' : p.root ? '' : 'dep'}>
-                      <div><b>{p.title}</b>
-                        <small>{p.error ? p.error : p.root ? p.file?.filename : 'Dependency of ' + [...p.requiredBy].join(', ')}</small></div>
-                      {p.root && <button className="icon" aria-label={`Remove ${p.title}`} onClick={() => setSelected((s) => s.filter((x) => x.id !== p.id))}><Trash2 size={14} /></button>}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )
-          })}
-          {!selected.length && <p className="empty">Add mods to start your pack.</p>}
-          <div className={'status ' + (broken.length ? 'bad' : ready.length ? 'ok' : '')}>
-            {broken.length ? `Incompatible: ${broken.length} mod(s) have no release for ${version} on ${loader}. Remove them or change version/loader.` : ready.length ? 'All required dependencies resolved from Modrinth.' : 'Nothing to check yet.'}
-          </div>
-          <p className="small">{ready.length} files · {(ready.reduce((n, p) => n + (p.file.size || 0), 0) / 1048576).toFixed(1)} MB</p>
-          {dl && (
-            <div className="dl">
-              <progress value={dl.done} max={dl.total || 1} />
-              <small>{dl.running ? `${dl.stage || dl.current} (${dl.done}/${dl.total})` : dl.note || `${dl.cancelled ? 'Cancelled. ' : ''}${dl.done}/${dl.total} downloaded`}</small>
-              {dl.failed?.length && !dl.running && <button className="ghost wide" onClick={retryFailed}>Retry {dl.failed.length} failed</button>}
-            </div>
-          )}
-          {dl?.running ? (
-            <button className="wide" onClick={() => cancel.current?.abort()}>Cancel download</button>
-          ) : (
-            <>
-              {launcherFolder && <button className="primary wide" disabled={!canExport} onClick={installToLauncher} style={{ marginBottom: '8px' }}>Install directly to Launcher</button>}
-              <button className="wide" disabled={!canExport} onClick={() => exportZip()}>Download ZIP</button>
-            </>
-          )}
-          {!!selected.length && <button className="ghost wide" onClick={() => confirm('Clear all selected mods?') && setSelected([])}>Clear selection</button>}
-          {!!selected.length && <button className="ghost wide" onClick={copyLink}>Copy share link</button>}
-          {note && <p className="small" role="status">{note}</p>}
-        </aside>
+        <PackPanel
+          open={panel}
+          onClose={() => setPanel(false)}
+          selected={selected}
+          plan={plan}
+          dl={dl}
+          canExport={canExport}
+          perfBusy={perfBusy}
+          planBusy={planBusy}
+          note={note}
+          addPerfMods={addPerfMods}
+          installToLauncher={installToLauncher}
+          exportZip={exportZip}
+          cancelDownload={() => cancel.current?.abort()}
+          clearSelection={() => confirm('Clear all selected mods?') && setSelected([])}
+          copyLink={copyLink}
+        />
       </div>
       {(selected.length > 0 || dl) && (
         <div className="dock" role="region" aria-label="Your pack">
