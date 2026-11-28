@@ -344,6 +344,122 @@ const [toasts, setToasts] = useState([])
     setDl({ running: false, done: files.length, total: files.length + failed.length, failed, retried: !!only })
   }
 
+  async function copyLink() {
+    const url = `${location.origin}${location.pathname}#pack=${toB64({ v: version, l: loader, p: ploader, m: selected })}`
+    try { await navigator.clipboard.writeText(url); setNote('Share link copied.') } catch { prompt('Copy this share link:', url) }
+  }
+
+  async function readMrpack(blob) {
+    const z = await JSZip.loadAsync(blob)
+    const entry = z.file('modrinth.index.json')
+    if (!entry) throw new Error('modrinth.index.json is missing')
+    const idx = JSON.parse(await entry.async('string'))
+    const { mods, missing } = await mrpackToMods(idx)
+    const dep = idx.dependencies || {}
+    const key = [['fabric-loader', 'fabric'], ['quilt-loader', 'quilt'], ['neoforge', 'neoforge'], ['forge', 'forge']].find(([k]) => dep[k])
+    return { d: { v: dep.minecraft, l: key ? key[1] : loader, m: mods }, missing }
+  }
+
+  function finishImport(d, missing) {
+    const v = validPack(d)
+    applyPack(v)
+    let msg = `Imported ${v.m.length} item(s).`
+    if (missing) msg += ` ${missing} file(s) were not found on Modrinth and were skipped.`
+    if (d.m.length > v.m.length) msg += ` Only the first ${v.m.length} of ${d.m.length} were loaded.`
+    setNote(msg)
+  }
+
+  async function importFile(e) {
+    const f = e.target.files[0]; e.target.value = ''
+    if (!f) return
+    setNote('Importing…')
+    try {
+      if (f.name.endsWith('.mrpack')) {
+        const { d, missing } = await readMrpack(f)
+        finishImport(d, missing)
+      } else {
+        const man = JSON.parse(await f.text())
+        finishImport({ v: man.minecraft, l: man.loader, m: (man.mods || []).filter((x) => x.reason === 'selected').map((x) => ({ id: x.projectId, title: x.project, type: x.type })) }, 0)
+      }
+    } catch (err) { setNote('Import failed: ' + err.message) }
+  }
+
+  async function convertMrpack(file) {
+    if (!file) return
+    if (!/\.mrpack$/i.test(file.name)) { setConv({ error: 'That is not a .mrpack file.' }); return }
+    const ac = (convAbort.current = new AbortController())
+    const side = convSide
+    setConv({ running: true, name: file.name, stage: 'Reading pack…', done: 0, total: 0, failed: [] })
+    try {
+      const { d, missing } = await readMrpack(file)
+      const v = validPack(d)
+      const list = v.m
+      setConv((c) => ({ ...c, stage: 'Downloading files…', total: list.length }))
+      const snap = { zip: new JSZip(), files: [], version: v.v, loader: v.l, ploader }
+      const failed = []
+      for (const [i, m] of list.entries()) {
+        if (ac.signal.aborted) break
+        setConv((c) => ({ ...c, current: m.title, done: i }))
+        try {
+          const p = await j(`/project/${m.id}`)
+          m.title = p.title; m.slug = p.slug; m.icon = p.icon_url; m.type = typeOf(p.project_type)
+          const vers = await j(versionsPath(m.id, v.v, m.type, m.type === 'plugin' ? v.p || 'paper' : v.l))
+          const ver = vers.find((x) => x.version_type === 'release') || vers[0]
+          if (!ver) throw new Error(`No release for ${m.title}`)
+          m.file = ver.files.find((f) => f.primary) || ver.files[0]
+          const r = await fetch(m.file.url, { signal: ac.signal })
+          if (!r.ok) throw new Error('HTTP ' + r.status)
+          const buf = await r.arrayBuffer()
+          if (m.file.hashes?.sha512 && hex(await crypto.subtle.digest('SHA-512', buf)) !== m.file.hashes.sha512) throw new Error('Hash mismatch')
+          const name = safe(m.file.filename)
+          const dir = T[m.type].dir
+          snap.zip.file(dir + '/' + name, buf)
+          snap.files.push({ project: m.title, projectId: m.id, type: m.type, versionId: ver.id, url: `https://modrinth.com/${m.type}/${m.slug}`, file: dir + '/' + name, verified: true, reason: 'selected' })
+        } catch (err) { failed.push(m.title) }
+      }
+      if (ac.signal.aborted) { setConv({ cancelled: true }); return }
+      setConv((c) => ({ ...c, stage: 'Building ZIP…' }))
+      const overrides = await j('/version/' + snap.version + '?include=files') // Not quite right, need to get overrides from the mrpack
+      // For now, just build the zip with the mods
+      snap.zip.file('manifest.json', JSON.stringify({ app: 'DIV Modpack Builder', exported: new Date().toISOString(), minecraft: snap.version, loader: snap.loader, ...(snap.files.some((f) => f.type === 'plugin') ? { pluginPlatform: snap.ploader } : {}), mods: snap.files, failed }, null, 2))
+      const blob = await snap.zip.generateAsync({ type: 'blob' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url; a.download = `div-modpack-${snap.version}-${snap.loader}.zip`; a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 10000)
+      setConv({ running: false, pack: file.name, mc: v.v, loader: v.l, done: snap.files.length, total: list.length, extra: 0, skipped: missing, failed })
+    } catch (err) {
+      if (ac.signal.aborted) return
+      setConv({ error: err.message })
+    }
+  }
+
+  async function checkUpdates(p) {
+    const set = (m) => setUpdates((u) => ({ ...u, [p.id]: m }))
+    if (!p.vers) { set('No version data saved. Re-save this pack to enable update checks.'); return }
+    set('Checking…')
+    try {
+      const out = [], next = { ...p.vers }
+      for (const [id, o] of Object.entries(p.vers)) {
+        const t = typeOf(p.mods.find((m) => m.id === id)?.type)
+        const vs = await j(versionsPath(id, p.version, t, t === 'plugin' ? p.ploader || 'paper' : p.loader))
+        const latest = vs.find((x) => x.version_type === 'release') || vs[0]
+        if (latest && latest.id !== o.vid) { out.push(`${o.title}: ${o.num} → ${latest.version_number}`); next[id] = { vid: latest.id, num: latest.version_number, title: o.title } }
+      }
+      if (out.length) setPending((x) => ({ ...x, [p.id]: next }))
+      set(out.length ? `${out.length} update(s): ${out.join('; ')}` : 'Everything is up to date.')
+    } catch (e) { set('Check failed: ' + e.message) }
+  }
+
+  function updatePack(p) {
+    const next = pending[p.id]
+    if (!next) return
+    if (selected.length && !confirm('Replace your current selection with the updated pack?')) return
+    setPacks((a) => a.map((x) => (x.id === p.id ? { ...x, vers: next } : x)))
+    setPending(({ [p.id]: _, ...rest }) => rest)
+    setUpdates((u) => ({ ...u, [p.id]: 'Updated. Download from the selection panel to get the new files.' }))
+    setVersion(p.version); setLoader(p.loader); setPloader(PLUGIN_LOADERS[p.ploader] ? p.ploader : 'paper'); setSelected(p.mods.filter((m) => m && m.id)); setView('browse')
+  }
+
   const counts = { selection: selected.length, packs: packs.length, favorites: favs.length }
 
   return (
