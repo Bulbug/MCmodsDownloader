@@ -75,6 +75,10 @@ export default function Sidebar({
               aria-pressed={view === 'browse' && type === t.id}
               onClick={() => handleTypeChange(t)}
               title={t.label}
+              onMouseDown={(e) => {
+                e.currentTarget.classList.add('active-press')
+                setTimeout(() => e.currentTarget.classList.remove('active-press'), 150)
+              }}
             >
               {TYPE_ICONS[t.id]}
               {!collapsed && <span>{t.label}</span>}

@@ -108,9 +108,11 @@ header .search input::placeholder{color:var(--mute)}
 header .search kbd{font:500 12px var(--mono,ui-monospace,monospace);color:var(--mute);border:1px solid var(--line);border-radius:6px;padding:2px 8px;flex:none}
 .types{display:flex;flex-wrap:wrap;align-items:center;gap:12px;max-width:1360px;margin:28px auto 0;padding:0 clamp(16px,3vw,40px);overflow-x:auto;scrollbar-width:none;box-sizing:border-box}
 .types::-webkit-scrollbar{display:none}
-.tile{flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-width:112px;min-height:72px;padding:12px 16px;border-radius:18px;border:1px solid var(--line);background:var(--glass);color:var(--mute);font:500 14px var(--font);white-space:nowrap}
-.tile:hover{color:var(--text);border-color:var(--mute)}
-.tile.active{border-color:rgba(140,120,255,.55);background:linear-gradient(160deg,rgba(106,72,245,.32),rgba(74,92,232,.12));color:var(--text);font-weight:600}
+.tile{flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-width:112px;min-height:72px;padding:12px 16px;border-radius:18px;border:1px solid var(--line);background:var(--glass);color:var(--mute);font:500 14px var(--font);white-space:nowrap;transition:all 0.15s ease}
+.tile:hover{color:var(--text);border-color:var(--mute);transform:translateY(-2px)}
+.tile.active{border-color:rgba(140,120,255,.55);background:linear-gradient(160deg,rgba(106,72,245,.32),rgba(74,92,232,.12));color:var(--text);font-weight:600;transform:translateY(-1px);box-shadow:0 4px 12px rgba(106,72,245,.15)}
+.tile.active-press{transform:scale(0.97)}
+.tile:active{transform:scale(0.97)}
 .sections{margin-left:auto;display:flex;gap:2px;padding:4px;border-radius:99px;background:var(--glass);border:1px solid var(--line);flex:none}
 .sections button{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 16px;border-radius:99px;border:0;background:transparent;color:var(--mute);white-space:nowrap}
 .sections button.active{background:var(--text);color:var(--bg);font-weight:600}
